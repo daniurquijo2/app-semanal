@@ -42,7 +42,11 @@ input::placeholder,textarea::placeholder{color:var(--ph)}
 .h-dash:hover{background:var(--bg-raise)!important;color:var(--text)!important}
 .h-ev:hover{background:var(--chip-hover)!important;border-color:var(--hover-border)!important}
 .trow{background:var(--bg-field)}.trow:hover{background:var(--item-hover)}.trow.b{background:var(--chip)}.trow.flash{background:rgba(109,102,240,0.16)!important}
-.addbox .addcal{display:none}.addbox:focus-within .addcal{display:block}
+.addbox .addcal{display:none}.addbox:focus-within .addcal,.addbox:hover .addcal{display:flex}
+[data-scroll]{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.08) transparent}
+[data-scroll]:hover{scrollbar-color:rgba(255,255,255,0.16) transparent}
+[data-scroll]::-webkit-scrollbar{width:4px}[data-scroll]::-webkit-scrollbar-track{background:transparent}
+[data-scroll]::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:999px}[data-scroll]:hover::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.16)}
 .addbox:focus-within{border-style:solid!important;border-color:var(--accent-text)!important;background:var(--bg-field)!important}
 .addin:focus{border-style:solid!important;border-color:var(--accent-text)!important;background:var(--bg-field)!important;outline:none}
 .h-primary:hover{background:var(--accent-hover)!important}

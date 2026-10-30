@@ -246,20 +246,26 @@ class App extends Component {
 
   /* ----- puntero y teclado en el lienzo ----- */
   onWheel(e) {
-    const sc = e.target.closest && e.target.closest('[data-scroll]');
-    if (!e.ctrlKey && !e.metaKey && sc && sc.scrollHeight > sc.clientHeight + 1 && this.wheelMode() !== 'zoom') { const up = e.deltaY < 0; if ((up && sc.scrollTop > 0) || (!up && sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1)) return; }
+    const pinch = e.ctrlKey || e.metaKey;
+    // Dentro de una lista con desplazamiento, la rueda o los dos dedos mueven solo esa lista
+    const sc = !pinch && e.target.closest && e.target.closest('[data-scroll]');
+    if (sc && sc.scrollHeight > sc.clientHeight + 1 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      const up = e.deltaY < 0; const can = up ? sc.scrollTop > 0 : sc.scrollTop + sc.clientHeight < sc.scrollHeight - 1;
+      if (!can) e.preventDefault();
+      return;
+    }
     this._moved = true; e.preventDefault(); const r = this.vpRef.current.getBoundingClientRect();
-    if (e.ctrlKey || e.metaKey || this.wheelMode() === 'zoom') { const k = e.ctrlKey ? 0.01 : 0.0015; this.zoomAt(e.clientX - r.left, e.clientY - r.top, clamp(Math.exp(-e.deltaY * k), 0.8, 1.25), false); }
-    else { this.cam.x -= e.shiftKey ? e.deltaY : e.deltaX; if (!e.shiftKey) this.cam.y -= e.deltaY; this.applyCam(false); }
+    if (pinch || this.wheelMode() === 'zoom') { const k = pinch ? 0.01 : 0.0015; this.zoomAt(e.clientX - r.left, e.clientY - r.top, clamp(Math.exp(-e.deltaY * k), 0.8, 1.25), false); }
+    else { const f = e.deltaMode === 1 ? 16 : 1; this.cam.x -= (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * f; if (!(e.shiftKey && !e.deltaX)) this.cam.y -= e.deltaY * f; this.applyCam(false); }
   }
-  wheelMode() { return lsGetUI('wheel', 'zoom'); }
+  wheelMode() { return lsGetUI('wheel2', 'desplazar'); }
   onVpDown(e) {
     if (!this._moved && this.state.hint) setTimeout(() => this.setState({ hint: false }), 4000);
     this._moved = true;
     if (this.state.menu) this.setState({ menu: null });
     if (e.pointerType === 'touch') { this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (this.pts.size === 2) { const [a, b] = [...this.pts.values()]; this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: this.cam.s }; this.pan = null; return; } }
     this._panMoved = false;
-    if (e.button === 1 || (e.button === 0 && !e.target.closest('[draggable="true"],input,textarea,select,[data-note],a'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
+    if (e.button === 1 || (e.button === 0 && !e.target.closest('[draggable="true"],input,textarea,select,[data-note],a,[data-addbox]'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
   }
   onMove(e) {
     if (this.fd) { this.fvMove(e); return; }
@@ -286,6 +292,7 @@ class App extends Component {
     this.set(s => ({ notes: [...s.notes, n], menu: null }), () => { const ta = this.worldRef.current.querySelector(`[data-note="${n.id}"] textarea`); if (ta) ta.focus({ preventScroll: true }); });
   }
   onKey(e) {
+    if (e.key === 'Escape' && this.state.calPick) { this.setState({ calPick: null }); return; }
     if (document.querySelector('dialog[open]')) return;
     const tag = e.target.tagName; const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (e.key === 'Escape') {
@@ -489,13 +496,29 @@ class App extends Component {
   toggleEvDone(o) { const key = evKey(o); this.itemUpd('e:' + key, { done: !state.evDone[key] }); }
   // Campo «+ Añadir tarea» con desplegable de calendario a la derecha (aparece al escribir)
   addBox(k, label, ph, bc, onAdd) {
-    this._addCal = this._addCal || {}; const cals = this.cals(); const cur = this._addCal[k] && cals.some(c => c.id === this._addCal[k]) ? this._addCal[k] : this.defCal();
-    const col = (cals.find(c => c.id === cur) || { color: '#6B7684' }).color;
-    return html`<div class="addbox" data-addbox="1" style=${`flex:none;width:100%;height:36px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border:1px dashed ${bc};border-radius:8px;background:transparent`}>
-      <input aria-label=${label} placeholder=${ph} onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { onAdd(v, ev.target.parentNode.querySelector('select').value); ev.target.value = ''; } }} style="flex:1;min-width:0;height:100%;padding:0;border:0;background:transparent;font-size:13px;outline:none" />
-      <span class="addcal" style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${col}`}></span>
-      <select class="addcal" aria-label="Calendario de la nueva tarea" value=${cur} onChange=${e => { this._addCal[k] = e.target.value; this.forceUpdate(); }} style="flex:none;max-width:120px;height:26px;padding:0 4px;border:1px solid #242B34;border-radius:6px;background:#151A21;color:#E6E9EE;font-size:12px;outline:none;cursor:pointer">${cals.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>
+    this._addCal = this._addCal || {}; const cals = this.cals(); const ok = id => id && cals.some(c => c.id === id);
+    const last = lsGetUI('lastCal', null); const cur = ok(this._addCal[k]) ? this._addCal[k] : ok(last) ? last : this.defCal();
+    const c0 = cals.find(c => c.id === cur) || { color: '#6B7684', name: '' };
+    const create = (inp) => { const v = inp.value.trim(); if (!v) return; onAdd(v, cur); lsSetUI('lastCal', cur); delete this._addCal[k]; inp.value = ''; };
+    return html`<div class="addbox" data-addbox=${k} style=${`flex:none;width:100%;height:36px;display:flex;align-items:center;gap:4px;padding:0 4px 0 10px;border:1px dashed ${bc};border-radius:8px;background:transparent`}>
+      <input aria-label=${label} placeholder=${ph} onKeyDown=${ev => { if (ev.key === 'Enter') create(ev.target); }} style="flex:1;min-width:0;height:100%;padding:0;border:0;background:transparent;font-size:13px;outline:none" />
+      <button class="addcal h-raise" aria-label=${'Calendario: ' + c0.name + '. Cambiar'} title=${c0.name} aria-haspopup="listbox"
+        onPointerDown=${e => e.preventDefault()}
+        onClick=${e => { const r = e.currentTarget.getBoundingClientRect(); this.setState(st => ({ calPick: st.calPick && st.calPick.k === k ? null : { k, x: r.right, y: r.bottom, top: r.top } })); }}
+        style="flex:none;height:26px;padding:0 4px 0 7px;border:0;border-radius:6px;background:transparent;display:flex;align-items:center;gap:3px;cursor:pointer;color:#8B95A3">
+        <span style=${`width:10px;height:10px;border-radius:999px;background:${c0.color}`}></span>${svg(IC.down, { s: 13, w: 2.2 })}
+      </button>
     </div>`;
+  }
+  calPickView() {
+    const p = this.state.calPick; if (!p) return null; const cals = this.cals();
+    const H = Math.min(cals.length * 38 + 12, 300); const below = p.y + H + 8 < innerHeight; const top = below ? p.y + 4 : p.top - H - 4;
+    const pick = id => { this._addCal[p.k] = id; this.setState({ calPick: null }, () => { const i = document.querySelector(`[data-addbox="${p.k}"] input`); if (i) i.focus({ preventScroll: true }); }); };
+    return html`<div onPointerDown=${() => this.setState({ calPick: null })} style="position:fixed;inset:0;z-index:36"></div>
+      <div role="listbox" aria-label="Calendario de la nueva tarea" style=${MENU + `;position:fixed;left:${clamp(p.x - 220, 8, innerWidth - 228)}px;top:${top}px;z-index:37;width:220px;max-height:300px;overflow:auto;padding:6px;gap:2px`}>
+        ${cals.map(c => html`<button role="option" class="h-raise" onClick=${() => pick(c.id)} style="display:flex;align-items:center;gap:10px;min-height:34px;padding:0 10px;border:0;border-radius:6px;background:transparent;cursor:pointer;text-align:left;color:#E6E9EE;font-size:13px">
+          <span style=${`width:10px;height:10px;flex:none;border-radius:999px;background:${c.color}`}></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name}</span></button>`)}
+      </div>`;
   }
   dayCard(dd, j, wkKey, tw, evs, tk) {
     const s = this.state; const dk = dkey(dd), isT = dk === tk, over = s.drop === dk;
@@ -596,7 +619,7 @@ class App extends Component {
         <button class="h-raise" style=${MI} onClick=${() => this.setState({ menu: 'search' })}><span>Buscar</span><${Kbd} k="⌘K" /></button>
         <${Div} />
         <${SecLbl} t="AJUSTES" />
-        <button class="h-raise" style=${MI} onClick=${() => { const v = this.wheelMode() === 'zoom' ? 'desplazar' : 'zoom'; lsSetUI('wheel', v); this.forceUpdate(); }}><span>Rueda del ratón</span><span style="color:#A39CFB;font-size:12.5px">${this.wheelMode() === 'zoom' ? 'zoom' : 'desplazar'}</span></button>
+        <button class="h-raise" style=${MI} onClick=${() => { const v = this.wheelMode() === 'zoom' ? 'desplazar' : 'zoom'; lsSetUI('wheel2', v); this.forceUpdate(); }}><span>Rueda / dos dedos</span><span style="color:#A39CFB;font-size:12.5px">${this.wheelMode() === 'zoom' ? 'zoom' : 'desplazar'}</span></button>
         <button class="h-raise" style=${MI} onClick=${() => { lsSetUI('weekend', !lsGetUI('weekend', true)); this.forceUpdate(); }}><span>Fin de semana</span><span style="color:#A39CFB;font-size:12.5px">${lsGetUI('weekend', true) ? 'visible' : 'oculto'}</span></button>
         <${Div} />
         <${SecLbl} t="DATOS" />
@@ -1099,12 +1122,13 @@ class App extends Component {
       ${this.topRight(results, q)}
       ${this.bottomBar()}
       ${s.hint && s.vw >= 900 ? html`<div style="position:fixed;left:16px;bottom:16px;z-index:20;max-width:calc(100vw - 340px);min-height:40px;padding:6px 6px 6px 14px;border-radius:8px;background:rgba(14,17,22,0.88);border:1px solid #1B212A;color:#AEB6C2;font-size:12.5px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 14px rgba(0,0,0,0.35);backdrop-filter:blur(8px)">
-        <span>Arrastra el fondo para moverte · <b style="font-weight:600">rueda</b> para zoom · <b style="font-weight:600">doble clic</b> crea una nota · arrastra tareas entre días</span>
+        <span>Arrastra o desliza con <b style="font-weight:600">dos dedos</b> para moverte · <b style="font-weight:600">pellizca</b> (o Ctrl + rueda) para zoom · <b style="font-weight:600">doble clic</b> crea una nota</span>
         <button class="h-raise" onClick=${() => { this.setState({ hint: false }); lsSetUI('hint', false); }} aria-label="Ocultar ayuda" style="width:28px;height:28px;flex:none;padding:0;border:0;border-radius:8px;background:transparent;color:#8B95A3;cursor:pointer;display:flex;align-items:center;justify-content:center">${svg(IC.x, { s: 14 })}</button>
       </div>` : null}
       ${this.fvView(calMap)}
       ${this.menus()}
       ${this.popView()}
+      ${this.calPickView()}
       ${s.toast ? html`<div role="status" style="position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:40;padding:10px 16px;border-radius:8px;background:#0E1116;border:1px solid #242B34;color:#E6E9EE;font-size:13px;box-shadow:0 12px 32px rgba(0,0,0,0.6);animation:rise .2s ease-out;max-width:calc(100vw - 32px)">${s.toast}</div>` : null}
     `;
   }
