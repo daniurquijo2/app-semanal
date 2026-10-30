@@ -468,7 +468,7 @@ class App extends Component {
       onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'task', id: t.id }, e.currentTarget, true); }}
       style=${`display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;opacity:${drag ? 0.4 : 1};cursor:grab;transition:background .3s, opacity .15s;${dp.lineShadow}${bucket && !dp.lineShadow ? 'box-shadow:0 1px 2px rgba(0,0,0,0.3)' : ''}`}>
       <${Check} on=${t.done} onClick=${() => this.updTask(t.id, { done: !t.done })} />
-      <span role="button" tabindex="0" onKeyDown=${e => { if (e.key === 'Enter') this.openPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode, false); }} onClick=${e => this.clickPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode)} style=${`flex:1;min-width:0;padding:0;border:0;background:none;text-align:left;font-size:13px;line-height:18px;overflow-wrap:anywhere;cursor:pointer;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
+      <span role="button" tabindex="0" onKeyDown=${e => { if (e.key === 'Enter') this.openPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode, false); }} onClick=${e => this.clickPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode)} title=${t.title} style=${`flex:1;min-width:0;padding:0;border:0;background:none;text-align:left;font-size:13px;line-height:18px;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;cursor:pointer;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
       ${t.time ? html`<span class="mono" style="flex:none;font-size:10.5px;line-height:18px;color:#8B95A3">${t.time}</span>` : null}
       ${t.notes && !bucket ? svg(IC.notes, { s: 13, c: '#6B7684', st: 'flex:none;margin-top:3px' }) : null}
       ${t.color ? html`<span style=${`width:8px;height:8px;flex:none;margin-top:5px;border-radius:999px;background:${t.color}`}></span>` : null}
@@ -481,19 +481,29 @@ class App extends Component {
       style=${`display:flex;align-items:flex-start;gap:8px;width:100%;padding:7px 8px;border:1px solid #1B212A;border-radius:8px;color:#E6E9EE;cursor:grab;opacity:${drag ? 0.4 : done ? 0.6 : 1};transition:all .2s cubic-bezier(.4,0,.2,1);${dp.lineShadow}`}>
       <${Check} on=${done} onClick=${() => this.toggleEvDone(o)} />
       <span role="button" tabindex="0" onKeyDown=${e => { if (e.key === 'Enter') this.openPop({ kind: 'event', o }, e.currentTarget.parentNode, false); }} onClick=${e => this.clickPop({ kind: 'event', o }, e.currentTarget.parentNode)} style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer">
-        <span style=${`display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:16px;font-weight:600;overflow-wrap:anywhere;text-decoration:${done ? 'line-through' : 'none'};color:${done ? '#6B7684' : '#E6E9EE'}`}><span style=${`width:7px;height:7px;flex:none;margin-top:4.5px;border-radius:999px;background:${col}`}></span>${o.ev.title}</span>
+        <span style=${`display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:16px;font-weight:600;overflow-wrap:anywhere;text-decoration:${done ? 'line-through' : 'none'};color:${done ? '#6B7684' : '#E6E9EE'}`}><span style=${`width:7px;height:7px;flex:none;margin-top:4.5px;border-radius:999px;background:${col}`}></span><span title=${o.ev.title} style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;min-width:0">${o.ev.title}</span></span>
         <span class="mono" style="font-size:10.5px;line-height:14px;color:#8B95A3;padding-left:14px">${item.it.label.replace('–', ' – ')}</span>
       </span>
     </div>`;
   }
   toggleEvDone(o) { const key = evKey(o); this.itemUpd('e:' + key, { done: !state.evDone[key] }); }
+  // Campo «+ Añadir tarea» con desplegable de calendario a la derecha (aparece al escribir)
+  addBox(k, label, ph, bc, onAdd) {
+    this._addCal = this._addCal || {}; const cals = this.cals(); const cur = this._addCal[k] && cals.some(c => c.id === this._addCal[k]) ? this._addCal[k] : this.defCal();
+    const col = (cals.find(c => c.id === cur) || { color: '#6B7684' }).color;
+    return html`<div class="addbox" data-addbox="1" style=${`flex:none;width:100%;height:36px;display:flex;align-items:center;gap:6px;padding:0 4px 0 10px;border:1px dashed ${bc};border-radius:8px;background:transparent`}>
+      <input aria-label=${label} placeholder=${ph} onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { onAdd(v, ev.target.parentNode.querySelector('select').value); ev.target.value = ''; } }} style="flex:1;min-width:0;height:100%;padding:0;border:0;background:transparent;font-size:13px;outline:none" />
+      <span class="addcal" style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${col}`}></span>
+      <select class="addcal" aria-label="Calendario de la nueva tarea" value=${cur} onChange=${e => { this._addCal[k] = e.target.value; this.forceUpdate(); }} style="flex:none;max-width:120px;height:26px;padding:0 4px;border:1px solid #242B34;border-radius:6px;background:#151A21;color:#E6E9EE;font-size:12px;outline:none;cursor:pointer">${cals.map(c => html`<option value=${c.id}>${c.name}</option>`)}</select>
+    </div>`;
+  }
   dayCard(dd, j, wkKey, tw, evs, tk) {
     const s = this.state; const dk = dkey(dd), isT = dk === tk, over = s.drop === dk;
     const dT = tw.filter(t => t.date === dk); const ek = [...new Set((evs[dk] || []).map(it => evKey(OCC[it.i])))];
     const dTot = dT.length + ek.length, dD = dT.filter(t => t.done).length + ek.filter(k => state.evDone[k]).length; const pct = dTot ? Math.round(dD / dTot * 100) : 0;
     const items = this.dayItems(dk, evs[dk], dT);
     return html`<div key=${dk} data-day=${dk}
-      onClick=${ev => { if (this._panMoved || ev.target.closest('[draggable],button,input,textarea,select')) return; this.openFV('day', dk); }}
+      onClick=${ev => { if (this._panMoved || ev.target.closest('[draggable],button,input,textarea,select,[data-addbox]')) return; this.openFV('day', dk); }}
       onDragOver=${e => { if (!this._drag) return; e.preventDefault(); if (s.drop !== dk) this.setState({ drop: dk, dropAt: null }); }}
       onDragLeave=${e => { if (!e.currentTarget.contains(e.relatedTarget) && s.drop === dk) this.setState({ drop: null }); }}
       onDrop=${e => { e.preventDefault(); this.dropItem(dk, null, true); }}
@@ -511,7 +521,7 @@ class App extends Component {
       <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">
         ${items.map(it => it.type === 'e' ? this.evRow(it, dk) : this.taskRow(it.t, dk, it, false))}
       </div>
-      <input class="addin" aria-label=${'Añadir tarea el ' + DIASL[j] + ' ' + dd.getDate()} onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { this.addTask(v, dk, wkKey); ev.target.value = ''; } }} placeholder="+ Añadir tarea" style="flex:none;width:100%;height:36px;padding:0 10px;border:1px dashed #242B34;border-radius:8px;background:transparent;font-size:13px" />
+      ${this.addBox(dk, 'Añadir tarea el ' + DIASL[j] + ' ' + dd.getDate(), '+ Añadir tarea', '#242B34', (v, cal) => this.addTask(v, dk, wkKey, { cal }))}
     </div>`;
   }
   weekRow(i, ctx) {
@@ -549,7 +559,7 @@ class App extends Component {
           style=${`min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:${bOver ? 'rgba(109,102,240,0.06)' : 'rgba(255,255,255,0.015)'};border:2px solid ${bOver ? '#5A54C4' : '#4E9B72'};cursor:default;transition:background .15s, border-color .15s`}>
           <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 2px 6px"><span style="font-size:14px;font-weight:600">sin fecha</span><span class="mono" style="font-size:11px;color:#8B95A3">${bt.length}</span></div>
           <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">${bItems.map(it => this.taskRow(it.t, bk, it, true))}</div>
-          <input class="addin" aria-label="Añadir tarea sin fecha" onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { this.addTask(v, null, key); ev.target.value = ''; } }} placeholder="+ Para cuando sea" style="flex:none;width:100%;height:36px;padding:0 10px;border:1px dashed #2E3742;border-radius:8px;background:transparent;font-size:13px" />
+          ${this.addBox(bk, 'Añadir tarea sin fecha', '+ Para cuando sea', '#2E3742', (v, cal) => this.addTask(v, null, key, { cal }))}
         </div>
       </div>
     </div>`;
