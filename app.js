@@ -26,7 +26,8 @@ const dow = d => (d.getDay() + 6) % 7;
 const area = t => (t.w || 200) * (t.h || 136);
 const lsGetUI = (k, d) => { try { const v = localStorage.getItem(UI + '.' + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } };
 const lsSetUI = (k, v) => { try { localStorage.setItem(UI + '.' + k, JSON.stringify(v)); } catch (_) {} };
-const DATA = ['tasks', 'goals', 'notes', 'groups', 'layouts'];
+const DATA = ['tasks', 'goals', 'notes', 'groups', 'layouts', 'evDone', 'evHidden', 'dayOrder'];
+const evKey = o => o.c.id + '|' + (o.ev.gid || o.ev.uid) + '|' + (o.ev.allDay ? dkey(o.start) : o.start.getTime());
 
 function treemap(vals, rect) {
   const out = []; let row = []; const r = Object.assign({}, rect); let i = 0;
@@ -42,7 +43,8 @@ const svg = (d, o = {}) => html`<svg width=${o.s || 16} height=${o.s || 16} view
 const IC = {
   up: 'M18 15l-6-6-6 6', down: 'M6 9l6 6 6-6', left: 'M15 18l-6-6 6-6', plus: 'M12 5v14M5 12h14', minus: 'M5 12h14', x: 'M6 6l12 12M18 6L6 18',
   arrowUp: 'M12 19V5M5 12l7-7 7 7', arrowDown: 'M12 5v14M5 12l7 7 7-7', check: 'M5 12l5 5L20 7', notes: 'M4 6h16M4 12h16M4 18h10',
-  fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', cal: 'M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM3 10h18M8 3v4M16 3v4', clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
+  repeat: 'M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3', video: 'M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3', people: 'M9 4.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6', bell: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0', pin: 'M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11zM12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z', eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   eyeOff: 'M17.9 17.9A10.4 10.4 0 0 1 12 19c-6.5 0-10-7-10-7a18.5 18.5 0 0 1 5-5.9M9.9 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a18.6 18.6 0 0 1-2.2 3.2M3 3l18 18',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5', archive: 'M4 4h16a1.5 1.5 0 0 1 1.5 1.5v2A1.5 1.5 0 0 1 20 9H4a1.5 1.5 0 0 1-1.5-1.5v-2A1.5 1.5 0 0 1 4 4zM5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4',
   tree: 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM12 3v18M12 12h9M16.5 12v9', file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5', link: 'M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1 1M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1-1'
@@ -72,12 +74,12 @@ class App extends Component {
     this._undo = []; this._redo = [];
     this.vpRef = { current: null }; this.worldRef = { current: null }; this.zoomRef = { current: null };
     this.searchRef = { current: null }; this.fvBoardRef = { current: null }; this.geRef = { current: null };
-    this.pts = new Map();
+    this.pts = new Map(); this._dayKeys = {};
   }
 
   /* ----- datos ----- */
   migrate() {
-    state.notes = state.notes || []; state.groups = state.groups || []; state.layouts = state.layouts || {};
+    state.notes = state.notes || []; state.groups = state.groups || []; state.layouts = state.layouts || {}; state.evDone = state.evDone || {}; state.evHidden = state.evHidden || {}; state.dayOrder = state.dayOrder || {};
     state.tasks = state.tasks.map(t => {
       let n = t; const i = OLD_COLORS.indexOf(t.color);
       if (i >= 0) n = Object.assign({}, n, { color: TCOLORS[i] });
@@ -87,7 +89,7 @@ class App extends Component {
     });
   }
   refresh() { this.forceUpdate(); }
-  data() { return { tasks: state.tasks, goals: state.goals, notes: state.notes, groups: state.groups, layouts: state.layouts }; }
+  data() { return { tasks: state.tasks, goals: state.goals, notes: state.notes, groups: state.groups, layouts: state.layouts, evDone: state.evDone, evHidden: state.evHidden, dayOrder: state.dayOrder }; }
   set(p, cb) {
     if (typeof p === 'function') p = p(Object.assign({}, this.data(), this.state));
     if (!p) { if (cb) cb(); return; }
@@ -142,6 +144,12 @@ class App extends Component {
   componentDidUpdate(pp, ps) {
     if (this.state.menu === 'search' && ps.menu !== 'search' && this.searchRef.current) this.searchRef.current.focus({ preventScroll: true });
     if (this.state.fv && !ps.fv) requestAnimationFrame(() => this.forceUpdate());
+    const p = this.state.pop;
+    if (p && p.focusDesc && (!ps.pop || !ps.pop.focusDesc || ps.pop !== p)) {
+      const ta = document.querySelector('[data-pop] textarea[data-desc]');
+      if (ta) { ta.focus({ preventScroll: true }); const n = ta.value.length; ta.setSelectionRange(n, n); ta.scrollTop = ta.scrollHeight; }
+      this.setState({ pop: Object.assign({}, p, { focusDesc: false }) });
+    }
   }
 
   /* ----- cámara ----- */
@@ -221,7 +229,8 @@ class App extends Component {
     this._moved = true;
     if (this.state.menu) this.setState({ menu: null });
     if (e.pointerType === 'touch') { this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (this.pts.size === 2) { const [a, b] = [...this.pts.values()]; this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: this.cam.s }; this.pan = null; return; } }
-    if (e.button === 1 || (e.button === 0 && !e.target.closest('[data-nopan]'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
+    this._panMoved = false;
+    if (e.button === 1 || (e.button === 0 && !e.target.closest('[draggable="true"],input,textarea,select,[data-note],a'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
   }
   onMove(e) {
     if (this.fd) { this.fvMove(e); return; }
@@ -231,7 +240,7 @@ class App extends Component {
       const d = Math.hypot(a.x - b.x, a.y - b.y); const r = this.vpRef.current.getBoundingClientRect();
       this.zoomAt((a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, (this.pinch.s * d / this.pinch.d) / this.cam.s, false); return;
     }
-    if (this.pan) { this.cam.x = this.pan.x + e.clientX - this.pan.sx; this.cam.y = this.pan.y + e.clientY - this.pan.sy; this.applyCam(false); }
+    if (this.pan) { if (!this._panMoved && Math.hypot(e.clientX - this.pan.sx, e.clientY - this.pan.sy) > 4) this._panMoved = true; this.cam.x = this.pan.x + e.clientX - this.pan.sx; this.cam.y = this.pan.y + e.clientY - this.pan.sy; this.applyCam(false); }
     else if (this.nd) { const d = this.nd; const nx = d.ox + (e.clientX - d.sx) / this.cam.s, ny = d.oy + (e.clientY - d.sy) / this.cam.s; this.set(s => ({ notes: s.notes.map(n => n.id === d.id ? Object.assign({}, n, { x: nx, y: ny }) : n) })); }
   }
   onUp(e) {
@@ -241,7 +250,7 @@ class App extends Component {
     if (this.pan) { this.pan = null; this.vpRef.current.style.cursor = 'grab'; }
     this.nd = null;
   }
-  onVpDbl(e) { if (e.target.closest('[data-nopan]')) return; const r = this.vpRef.current.getBoundingClientRect(); this.addNote((e.clientX - r.left - this.cam.x) / this.cam.s - 115, (e.clientY - r.top - this.cam.y) / this.cam.s - 15); }
+  onVpDbl(e) { if (e.target.closest('[data-week],[data-note],button,input,textarea,select,a')) return; const r = this.vpRef.current.getBoundingClientRect(); this.addNote((e.clientX - r.left - this.cam.x) / this.cam.s - 115, (e.clientY - r.top - this.cam.y) / this.cam.s - 15); }
   addNoteCenter() { const vp = this.vpRef.current; this.addNote((vp.clientWidth / 2 - this.cam.x) / this.cam.s - 115, (vp.clientHeight / 2 - this.cam.y) / this.cam.s - 80); }
   addNote(x, y) {
     const n = { id: uid(), x, y, text: '', color: NOTE_COLORS[state.notes.length % 4], rot: Math.round((Math.random() * 3 - 1.5) * 10) / 10 };
@@ -252,8 +261,8 @@ class App extends Component {
     const tag = e.target.tagName; const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (e.key === 'Escape') {
       const S = this.state;
-      if (S.ge || S.dm || S.ctx) this.setState({ ge: null, dm: null, ctx: null });
-      else if (S.pop || S.menu) this.setState({ menu: null, pop: null });
+      if (S.ge || S.ctx) this.setState({ ge: null, ctx: null });
+      else if (S.pop || S.menu) { this.closePop(true); this.setState({ menu: null, pop: null }); }
       else if (S.fv && S.fv.showHidden) this.setFv({ showHidden: false });
       else if (S.fv && (S.fv.sel || []).length) this.setFv({ sel: [] });
       else if (S.fv) this.setState({ fv: null, fvLive: null });
@@ -268,7 +277,7 @@ class App extends Component {
       const k = e.key;
       if (k === 'w' || k === 'W') { this.fvHideKey(); return; }
       if (k === 'q' || k === 'Q') this.fvSort();
-      else if ((k === 'Enter' || k === 'g' || k === 'G') && !this.state.ge && !this.state.dm && (this.state.fv.sel || []).length) { e.preventDefault(); this.openGroupMenu(); }
+      else if ((k === 'Enter' || k === 'g' || k === 'G') && !this.state.ge && !this.state.pop && (this.state.fv.sel || []).length) { e.preventDefault(); this.openGroupMenu(); }
       return;
     }
     const k = e.key;
@@ -296,7 +305,7 @@ class App extends Component {
     if (e.button !== 0 || e.target.closest('[data-card]') || e.target.closest('[data-hull]')) return; e.preventDefault();
     const p = this.boardPt(e); const add = e.ctrlKey || e.metaKey || e.shiftKey;
     this.mq = { sx: p.x, sy: p.y, base: add ? (this.state.fv.sel || []) : [] };
-    this.setState(s => ({ ge: null, ctx: null, dm: null, mqRect: null, fv: add ? s.fv : Object.assign({}, s.fv, { sel: [] }) }));
+    this.setState(s => ({ ge: null, ctx: null, mqRect: null, fv: add ? s.fv : Object.assign({}, s.fv, { sel: [] }) }));
   }
   fvMq(e) {
     const p = this.boardPt(e), m = this.mq; const r = { x: Math.min(m.sx, p.x), y: Math.min(m.sy, p.y), w: Math.abs(p.x - m.sx), h: Math.abs(p.y - m.sy) };
@@ -311,7 +320,7 @@ class App extends Component {
     const ce = e.target.closest('[data-corner]');
     if (!sel.includes(id)) { sel = [id]; this.setFv({ sel }); }
     const ids = ce ? [id] : sel; const B = this._fvRects || {}; const o = {}; ids.forEach(k => { if (B[k]) o[k] = Object.assign({}, B[k]); });
-    this.fd = { id, ids: Object.keys(o), corner: ce ? ce.getAttribute('data-corner') : null, sx: e.clientX, sy: e.clientY, o, moved: false };
+    this.fd = { id, ids: Object.keys(o), corner: ce ? ce.getAttribute('data-corner') : null, sx: e.clientX, sy: e.clientY, o, moved: false, el: e.currentTarget };
   }
   fvMove(e) {
     const d = this.fd; const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
@@ -328,14 +337,14 @@ class App extends Component {
   }
   fvUp() {
     const d = this.fd; this.fd = null; const L = this.state.fvLive;
-    if (!d.moved || !L) { this.setState({ fvLive: null }); return; }
+    if (!d.moved || !L) { this.setState({ fvLive: null }); if (!d.moved && !d.corner) { clearTimeout(this._clk); const el = d.el; this._clk = setTimeout(() => { if (!this.state.pop) this.openPop({ kind: 'task', id: d.id }, el, false); }, 230); } return; }
     const vk = this.fvKey();
     this.set(s => {
       const lay = Object.assign({}, s.layouts[vk] || {}); Object.keys(L).forEach(k => { lay[k] = { x: L[k].x, y: L[k].y }; });
       return { fvLive: null, tasks: d.corner && L[d.id] ? s.tasks.map(t => t.id === d.id ? Object.assign({}, t, { w: L[d.id].w, h: L[d.id].h }) : t) : s.tasks, layouts: Object.assign({}, s.layouts, { [vk]: lay }) };
     });
   }
-  fvDbl(id, e) { if (e.target.closest('[data-nodrag]')) return; const r = e.currentTarget.getBoundingClientRect(); this.setState({ dm: Object.assign({ id }, this.popPos(r)), ge: null, ctx: null }); }
+  fvDbl(id, e) { if (e.target.closest('[data-nodrag]')) return; clearTimeout(this._clk); this.openPop({ kind: 'task', id }, e.currentTarget, true); }
   openGroupMenu() {
     const f = this.state.fv; if (!f || !(f.sel || []).length) return; const S = this._fvShown || {}; const b = this.fvBoardRef.current.getBoundingClientRect();
     let x1 = 1e9, y2 = -1e9, x2 = -1e9; f.sel.forEach(k => { const c = S[k]; if (!c) return; x1 = Math.min(x1, c.x); x2 = Math.max(x2, c.x + c.w); y2 = Math.max(y2, c.y + c.h); });
@@ -374,33 +383,80 @@ class App extends Component {
   }
 
   /* ----- piezas del lienzo principal ----- */
-  taskRow(t, bucket) {
-    const s = this.state; const drag = s.dragId === t.id, fl = s.flash === t.id;
-    return html`<div key=${t.id} class=${'trow' + (bucket ? ' b' : '') + (fl ? ' flash' : '')} draggable="true"
-      onContextMenu=${e => this.openCtx(t.id, e)}
-      onDragStart=${e => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; setTimeout(() => this.setState({ dragId: t.id }), 0); }}
-      onDragEnd=${() => this.setState({ dragId: null, drop: null })}
-      style=${`display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;opacity:${drag ? 0.4 : 1};cursor:grab;transition:background .3s, opacity .15s${bucket ? ';box-shadow:0 1px 2px rgba(0,0,0,0.3)' : ''}`}>
+  // Lista ordenada de lo que hay en un día (o en «sin fecha»): eventos y tareas mezclados.
+  dayItems(ok, evItems, tasks) {
+    const s = this.state; const items = [];
+    (evItems || []).forEach(it => { const o = OCC[it.i]; const key = evKey(o); const done = !!state.evDone[key]; if (s.hideDone && done) return; items.push({ k: 'e:' + key, type: 'e', it, o, key, done, def: it.sort }); });
+    tasks.forEach((t, j) => { if (s.hideDone && t.done) return; items.push({ k: 't:' + t.id, type: 't', t, done: t.done, def: 10000 + j }); });
+    const ord = state.dayOrder[ok] || []; const idx = k => { const i = ord.indexOf(k); return i < 0 ? 1e9 : i; };
+    items.sort((a, b) => (idx(a.k) - idx(b.k)) || (a.def - b.def));
+    this._dayKeys[ok] = items.map(x => x.k);
+    return items;
+  }
+  dragProps(item, ok) {
+    const s = this.state; const at = s.dropAt && s.dropAt.k === item.k ? s.dropAt : null;
+    return {
+      draggable: 'true',
+      onDragStart: e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', item.k); e.dataTransfer.effectAllowed = 'move'; this._drag = { k: item.k, from: ok }; setTimeout(() => this.setState({ dragId: item.k }), 0); },
+      onDragEnd: () => { this._drag = null; this.setState({ dragId: null, drop: null, dropAt: null }); },
+      onDragOver: e => { if (!this._drag) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; const r = e.currentTarget.getBoundingClientRect(); const after = e.clientY > r.top + r.height / 2; if (!at || at.after !== after || s.drop !== ok) this.setState({ dropAt: { k: item.k, after }, drop: ok }); },
+      onDrop: e => { e.preventDefault(); e.stopPropagation(); this.dropItem(ok, item.k, e.clientY > e.currentTarget.getBoundingClientRect().top + e.currentTarget.getBoundingClientRect().height / 2); },
+      lineShadow: at ? (at.after ? 'box-shadow:0 2px 0 0 #6D66F0;' : 'box-shadow:0 -2px 0 0 #6D66F0;') : ''
+    };
+  }
+  // Soltar un elemento en un día (ok = 'YYYY-MM-DD' o 'b:YYYY-Www'); targetK = elemento sobre el que se suelta.
+  dropItem(ok, targetK, after) {
+    const d = this._drag; this._drag = null;
+    this.setState({ drop: null, dropAt: null, dragId: null });
+    if (!d) return;
+    const k = d.k; const isBucket = ok.startsWith('b:'); const week = isBucket ? ok.slice(2) : weekKey(parseDkey(ok));
+    if (k.startsWith('e:') && d.from !== ok) { this.toast('Para cambiar el día de un evento, ábrelo y edítalo'); return; }
+    let keys = (this._dayKeys[ok] || []).filter(x => x !== k);
+    let pos = targetK && targetK !== k ? keys.indexOf(targetK) + (after ? 1 : 0) : keys.length; if (pos < 0) pos = keys.length;
+    keys.splice(pos, 0, k);
+    this.set(st => {
+      const dayOrder = Object.assign({}, st.dayOrder, { [ok]: keys });
+      if (d.from !== ok && dayOrder[d.from]) dayOrder[d.from] = dayOrder[d.from].filter(x => x !== k);
+      const out = { dayOrder };
+      if (k.startsWith('t:')) { const id = k.slice(2); out.tasks = st.tasks.map(t => t.id === id ? Object.assign({}, t, { date: isBucket ? null : ok, week }) : t); }
+      return out;
+    });
+  }
+  taskRow(t, ok, item, bucket) {
+    const s = this.state; const drag = s.dragId === item.k, fl = s.flash === t.id; const dp = this.dragProps(item, ok);
+    return html`<div key=${item.k} class=${'trow' + (bucket ? ' b' : '') + (fl ? ' flash' : '')} draggable="true"
+      onContextMenu=${e => this.openCtx(t.id, e)} onDragStart=${dp.onDragStart} onDragEnd=${dp.onDragEnd} onDragOver=${dp.onDragOver} onDrop=${dp.onDrop}
+      onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'task', id: t.id }, e.currentTarget, true); }}
+      style=${`display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;opacity:${drag ? 0.4 : 1};cursor:grab;transition:background .3s, opacity .15s;${dp.lineShadow}${bucket && !dp.lineShadow ? 'box-shadow:0 1px 2px rgba(0,0,0,0.3)' : ''}`}>
       <${Check} on=${t.done} onClick=${() => this.updTask(t.id, { done: !t.done })} />
-      <button onClick=${e => this.openTask(t.id, e)} style=${`flex:1;min-width:0;padding:0;border:0;background:none;text-align:left;font-size:13px;line-height:18px;overflow-wrap:anywhere;cursor:pointer;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</button>
+      <span role="button" tabindex="0" onKeyDown=${e => { if (e.key === 'Enter') this.openPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode, false); }} onClick=${e => this.clickPop({ kind: 'task', id: t.id }, e.currentTarget.parentNode)} style=${`flex:1;min-width:0;padding:0;border:0;background:none;text-align:left;font-size:13px;line-height:18px;overflow-wrap:anywhere;cursor:pointer;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
+      ${t.time ? html`<span class="mono" style="flex:none;font-size:10.5px;line-height:18px;color:#8B95A3">${t.time}</span>` : null}
       ${t.notes && !bucket ? svg(IC.notes, { s: 13, c: '#6B7684', st: 'flex:none;margin-top:3px' }) : null}
       ${t.color ? html`<span style=${`width:8px;height:8px;flex:none;margin-top:5px;border-radius:999px;background:${t.color}`}></span>` : null}
     </div>`;
   }
-  evChip(it) {
-    const o = OCC[it.i]; const col = evColor(o);
-    return html`<button key=${'e' + it.i} class="h-ev" onClick=${() => openEvent(it.i)} style="display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;padding:7px 10px;border:1px solid #1B212A;border-radius:8px;background:#161B22;color:#E6E9EE;text-align:left;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1)">
-      <span style="display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:16px;font-weight:600;overflow-wrap:anywhere"><span style=${`width:7px;height:7px;flex:none;margin-top:4.5px;border-radius:999px;background:${col}`}></span>${o.ev.title}</span>
-      <span class="mono" style="font-size:10.5px;line-height:14px;color:#8B95A3;padding-left:14px">${it.label.replace('–', ' – ')}</span>
-    </button>`;
+  evRow(item, ok) {
+    const s = this.state; const o = item.o; const col = evColor(o); const done = item.done; const dp = this.dragProps(item, ok); const drag = s.dragId === item.k;
+    return html`<div key=${item.k} class="evrow2" draggable="true" onDragStart=${dp.onDragStart} onDragEnd=${dp.onDragEnd} onDragOver=${dp.onDragOver} onDrop=${dp.onDrop}
+      onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'event', o }, e.currentTarget, true); }}
+      style=${`display:flex;align-items:flex-start;gap:8px;width:100%;padding:7px 8px;border:1px solid #1B212A;border-radius:8px;color:#E6E9EE;cursor:grab;opacity:${drag ? 0.4 : done ? 0.6 : 1};transition:all .2s cubic-bezier(.4,0,.2,1);${dp.lineShadow}`}>
+      <${Check} on=${done} onClick=${() => this.toggleEvDone(o)} />
+      <span role="button" tabindex="0" onKeyDown=${e => { if (e.key === 'Enter') this.openPop({ kind: 'event', o }, e.currentTarget.parentNode, false); }} onClick=${e => this.clickPop({ kind: 'event', o }, e.currentTarget.parentNode)} style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer">
+        <span style=${`display:flex;align-items:flex-start;gap:7px;font-size:12.5px;line-height:16px;font-weight:600;overflow-wrap:anywhere;text-decoration:${done ? 'line-through' : 'none'};color:${done ? '#6B7684' : '#E6E9EE'}`}><span style=${`width:7px;height:7px;flex:none;margin-top:4.5px;border-radius:999px;background:${col}`}></span>${o.ev.title}</span>
+        <span class="mono" style="font-size:10.5px;line-height:14px;color:#8B95A3;padding-left:14px">${item.it.label.replace('–', ' – ')}</span>
+      </span>
+    </div>`;
   }
+  toggleEvDone(o) { const key = evKey(o); this.set(st => { const m = Object.assign({}, st.evDone); if (m[key]) delete m[key]; else m[key] = true; return { evDone: m }; }); }
   dayCard(dd, j, wkKey, tw, evs, tk) {
     const s = this.state; const dk = dkey(dd), isT = dk === tk, over = s.drop === dk;
     const dT = tw.filter(t => t.date === dk), dD = dT.filter(t => t.done).length; const pct = dT.length ? Math.round(dD / dT.length * 100) : 0;
-    const dh = this.dropH(dk, dk, wkKey);
-    return html`<div key=${dk} data-nopan="1" data-day=${dk}
-      onClick=${ev => { if (ev.target.closest('[draggable],button,input,textarea,select')) return; this.openFV('day', dk); }}
-      onDragOver=${dh.onDragOver} onDragLeave=${dh.onDragLeave} onDrop=${dh.onDrop}
+    const items = this.dayItems(dk, evs[dk], dT);
+    return html`<div key=${dk} data-day=${dk}
+      onClick=${ev => { if (this._panMoved || ev.target.closest('[draggable],button,input,textarea,select')) return; this.openFV('day', dk); }}
+      onDragOver=${e => { if (!this._drag) return; e.preventDefault(); if (s.drop !== dk) this.setState({ drop: dk, dropAt: null }); }}
+      onDragLeave=${e => { if (!e.currentTarget.contains(e.relatedTarget) && s.drop === dk) this.setState({ drop: null }); }}
+      onDrop=${e => { e.preventDefault(); this.dropItem(dk, null, true); }}
       style=${`position:relative;min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:${over ? 'rgba(109,102,240,0.06)' : '#0E1116'};border:2px solid ${isT ? '#6D66F0' : over ? '#5A54C4' : '#1B212A'};cursor:pointer;transition:background .15s, border-color .15s`}>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 2px 4px">
         <div style="display:flex;align-items:center;gap:8px">
@@ -413,8 +469,7 @@ class App extends Component {
         </div>
       </div>
       <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">
-        ${(evs[dk] || []).map(it => this.evChip(it))}
-        ${dT.filter(t => !(s.hideDone && t.done)).map(t => this.taskRow(t, false))}
+        ${items.map(it => it.type === 'e' ? this.evRow(it, dk) : this.taskRow(it.t, dk, it, false))}
       </div>
       <input class="addin" aria-label=${'Añadir tarea el ' + DIASL[j] + ' ' + dd.getDate()} onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { this.addTask(v, dk, wkKey); ev.target.value = ''; } }} placeholder="+ Añadir tarea" style="flex:none;width:100%;height:36px;padding:0 10px;border:1px dashed #242B34;border-radius:8px;background:transparent;font-size:13px" />
     </div>`;
@@ -426,28 +481,32 @@ class App extends Component {
     const evs = eventsForWeek(key); ctx.evByWeek[key] = evs;
     const pendN = i >= 0 ? state.tasks.filter(t => weekOfTask(t) === prevK && !t.done).length : 0;
     const isCur = key === curK; const sun = addDays(mon, 6); const showWE = lsGetUI('weekend', true);
-    const bk = 'b:' + key, bOver = s.drop === bk, bt = tw.filter(t => !t.date); const bh = this.dropH(bk, null, key);
+    const bk = 'b:' + key, bOver = s.drop === bk, bt = tw.filter(t => !t.date); const bItems = this.dayItems(bk, null, bt);
     const big = 'font-size:36px;line-height:38px;font-weight:600;letter-spacing:-.03em;width:40px;text-align:center';
     return html`<div key=${key} data-week=${key} style=${`position:relative;display:flex;align-items:stretch;gap:14px;padding:14px;border-radius:14px;background:${isCur ? 'rgba(109,102,240,0.04)' : 'rgba(255,255,255,0.012)'};border:${isCur ? '1.5px solid rgba(109,102,240,0.32)' : '1.5px dashed #242B34'};opacity:${i < 0 ? 0.82 : 1};transition:opacity .2s`}>
-      <div data-nopan="1" style="width:80px;flex:none;display:flex;flex-direction:column;gap:14px;padding:16px 14px;border-radius:10px;background:#0E1116;border:1px solid #1B212A;cursor:default;user-select:text">
+      <div role="button" tabindex="0" class="wkpanel" title="Abrir el lienzo de la semana" aria-label=${'Abrir el lienzo de la semana ' + isoWeek(mon).week}
+        onClick=${e => { if (this._panMoved || e.target.closest('[data-own]')) return; this.openFV('week', key); }}
+        onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.openFV('week', key); } }}
+        style="width:80px;flex:none;display:flex;flex-direction:column;gap:14px;padding:16px 14px;border-radius:10px;background:#0E1116;border:1px solid #1B212A;cursor:pointer;transition:background .2s, border-color .2s">
         ${isCur ? html`<div><span class="mono" style="font-size:10px;letter-spacing:.12em;font-weight:500;padding:2px 6px;border-radius:999px;background:#6D66F0;color:#FFFFFF">AHORA</span></div>` : null}
         <div style="display:flex;flex-direction:column;gap:2px"><span class="disp" style=${big}>${mon.getDate()}</span><span style="font-size:12px;color:#8B95A3">lun · ${MES[mon.getMonth()]}</span></div>
-        <button onClick=${() => this.openFV('week', key)} title="Ver todas las tareas de la semana" aria-label=${'Abrir la semana ' + isoWeek(mon).week} class="h-tint" style="flex:1;min-height:40px;display:flex;justify-content:center;padding:0 0 0 2px;width:40px;border:0;background:transparent;cursor:pointer;border-radius:6px;transition:background .2s">
+        <div style="flex:1;min-height:40px;display:flex;justify-content:center;padding-left:2px;width:40px">
           <span style="position:relative;display:block;width:4px;height:100%;border-radius:999px;background:#1B212A;overflow:hidden"><span style=${`position:absolute;left:0;top:0;width:100%;height:${pct}%;border-radius:999px;background:#4E9B72;transition:height .5s cubic-bezier(.2,.8,.2,1)`}></span></span>
-        </button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:2px"><span class="disp" style=${big}>${sun.getDate()}</span><span style="font-size:12px;color:#8B95A3">dom · ${MES[sun.getMonth()]}</span></div>
         <div style="height:1px;background:#1B212A"></div>
         <div style="display:flex;flex-direction:column;gap:2px">
           <span class="disp" style="font-size:26px;line-height:30px;font-weight:600;letter-spacing:-.02em">${done}<span style="color:#6B7684">/${tw.length}</span></span>
           <span class="mono" style="font-size:11px;color:#4E9B72">${pct}%</span>
         </div>
-        ${pendN > 0 ? html`<button class="h-tint2" onClick=${() => { this.set(st => ({ tasks: st.tasks.map(t => weekOfTask(t) === prevK && !t.done ? Object.assign({}, t, { date: null, week: key }) : t) })); this.toast(pendN + ' pendientes movidas a «sin fecha»'); }} style="padding:7px 8px;border:0;border-radius:6px;background:rgba(109,102,240,0.08);color:#A39CFB;font-size:11.5px;font-weight:600;text-align:left;cursor:pointer;line-height:15px">Traer ${pendN} pendientes</button>` : null}
+        ${pendN > 0 ? html`<button data-own="1" class="h-tint2" onClick=${() => { this.set(st => ({ tasks: st.tasks.map(t => weekOfTask(t) === prevK && !t.done ? Object.assign({}, t, { date: null, week: key }) : t) })); this.toast(pendN + ' pendientes movidas a «sin fecha»'); }} style="padding:7px 8px;border:0;border-radius:6px;background:rgba(109,102,240,0.08);color:#A39CFB;font-size:11.5px;font-weight:600;text-align:left;cursor:pointer;line-height:15px">Traer ${pendN} pendientes</button>` : null}
       </div>
       <div style=${`display:grid;grid-template-columns:repeat(${showWE ? 4 : 3},264px);grid-auto-rows:330px;gap:14px`}>
         ${[0, 1, 2, 3, 4, 5, 6].filter(j => showWE || j < 5).map(j => this.dayCard(addDays(mon, j), j, key, tw, evs, tk))}
-        <div data-nopan="1" onDragOver=${bh.onDragOver} onDragLeave=${bh.onDragLeave} onDrop=${bh.onDrop} style=${`min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:${bOver ? 'rgba(109,102,240,0.06)' : 'rgba(255,255,255,0.015)'};border:2px solid ${bOver ? '#5A54C4' : '#4E9B72'};cursor:default;transition:background .15s, border-color .15s`}>
+        <div onDragOver=${e => { if (!this._drag) return; e.preventDefault(); if (s.drop !== bk) this.setState({ drop: bk, dropAt: null }); }} onDragLeave=${e => { if (!e.currentTarget.contains(e.relatedTarget) && s.drop === bk) this.setState({ drop: null }); }} onDrop=${e => { e.preventDefault(); this.dropItem(bk, null, true); }}
+          style=${`min-width:0;overflow:hidden;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:${bOver ? 'rgba(109,102,240,0.06)' : 'rgba(255,255,255,0.015)'};border:2px solid ${bOver ? '#5A54C4' : '#4E9B72'};cursor:default;transition:background .15s, border-color .15s`}>
           <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 2px 6px"><span style="font-size:14px;font-weight:600">sin fecha</span><span class="mono" style="font-size:11px;color:#8B95A3">${bt.length}</span></div>
-          <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">${bt.filter(t => !(s.hideDone && t.done)).map(t => this.taskRow(t, true))}</div>
+          <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">${bItems.map(it => this.taskRow(it.t, bk, it, true))}</div>
           <input class="addin" aria-label="Añadir tarea sin fecha" onKeyDown=${ev => { const v = ev.target.value.trim(); if (ev.key === 'Enter' && v) { this.addTask(v, null, key); ev.target.value = ''; } }} placeholder="+ Para cuando sea" style="flex:none;width:100%;height:36px;padding:0 10px;border:1px dashed #2E3742;border-radius:8px;background:transparent;font-size:13px" />
         </div>
       </div>
@@ -615,33 +674,172 @@ class App extends Component {
     </div>`;
   }
 
-  /* ----- panel de tarea (lienzo principal) ----- */
-  taskPop() {
-    const s = this.state, pop = s.pop; if (!pop || pop.type !== 'task') return null;
-    const t = state.tasks.find(x => x.id === pop.id); if (!t) return null;
-    const wk = weekOfTask(t), mon = weekStart(wk); const u = p => this.updTask(t.id, p);
-    const sel = 'height:40px;padding:0 10px;border:1px solid #242B34;border-radius:6px;background:#151A21;color:#E6E9EE';
-    return html`<div onPointerDown=${() => this.setState({ pop: null })} style="position:fixed;inset:0;z-index:30;background:rgba(5,7,9,0.45)"></div>
-    <div role="dialog" aria-label="Tarea" style=${`position:fixed;left:${pop.x}px;top:${pop.y}px;z-index:31;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:10px;background:#0E1116;border:1px solid #242B34;color:#E6E9EE;box-shadow:0 24px 56px rgba(0,0,0,0.75);display:flex;flex-direction:column;gap:14px;animation:pop .16s ease-out`}>
-      <input class="tin2" aria-label="Título" value=${t.title} onInput=${e => u({ title: e.target.value })} style="height:40px;padding:0 10px;margin:0 -4px;border:0;border-radius:6px;background:transparent;font-family:var(--disp);font-size:17px;font-weight:700;color:#E6E9EE;outline:none" />
-      <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Día</span>
-        <select value=${t.date || ''} onChange=${e => u({ date: e.target.value || null, week: wk })} style=${sel}>
-          <option value="">Sin día concreto</option>
-          ${[0, 1, 2, 3, 4, 5, 6].map(j => { const d = addDays(mon, j); return html`<option value=${dkey(d)}>${DIASL[j] + ' ' + d.getDate() + ' ' + MES[d.getMonth()]}</option>`; })}
-        </select></label>
-      <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Calendario</span>
-        <select value=${this.cOf(t)} onChange=${e => u({ cal: e.target.value })} style=${sel}>${this.cals().map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
-      <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Notas</span>
-        <textarea rows="3" value=${t.notes || ''} onInput=${e => u({ notes: e.target.value })} placeholder="Detalles, enlaces…" style="resize:vertical;padding:10px;border:1px solid #242B34;border-radius:6px;background:#151A21;color:#E6E9EE;font-size:13px;line-height:18px;outline:none"></textarea></label>
-      <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Color</span>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${[null].concat(TCOLORS).map(c => html`<button onClick=${() => u({ color: c })} aria-label=${c ? 'Color ' + c : 'Sin color'} style=${`width:28px;height:28px;padding:0;border-radius:999px;background:${c || 'transparent'};border:2px dashed ${c ? 'transparent' : '#3A434F'};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${(t.color || null) === c ? '#E6E9EE' : 'transparent'};cursor:pointer;transition:box-shadow .15s`}></button>`)}</div></div>
-      <div style="display:flex;gap:6px;padding-top:2px">
-        <button class="h-dangero" onClick=${() => this.delTask(t.id)} style="height:40px;padding:0 12px;border-radius:6px;background:transparent;border:1px solid #3A2725;color:#C9695E;font-weight:500;cursor:pointer">Eliminar</button>
-        <button class="h-sec2" onClick=${() => u({ done: !t.done })} style="flex:1;height:40px;border:1px solid #242B34;border-radius:8px;background:#151A21;color:#E6E9EE;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;cursor:pointer"><${Tick} on=${t.done} />Completada</button>
-      </div>
-    </div>`;
+  /* ----- menú flotante de tarea o evento (corto y ampliado) ----- */
+  // what = {kind:'task', id} | {kind:'event', o}; anchor = elemento o rectángulo; exp = abrir ya ampliado
+  openPop(what, anchor, exp) {
+    if (this.state.pop) this.closePop(true);
+    const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : anchor || { left: innerWidth / 2 - 160, right: innerWidth / 2 - 160, top: 120 };
+    const pos = this.popPos(r);
+    const pop = Object.assign({}, what, pos, { exp: !!exp, focusDesc: !!exp, delAsk: false });
+    if (what.kind === 'event') { this.evInit = null; this.evDraft = null; if (exp) this.startEvDraft(what.o, 'one'); }
+    this.setState({ pop, menu: null, ctx: null, ge: null });
   }
-
+  clickPop(what, el) { clearTimeout(this._clk); this._clk = setTimeout(() => this.openPop(what, el, false), 230); }
+  expandPop() {
+    const p = this.state.pop; if (!p) return;
+    if (p.kind === 'event') this.startEvDraft(p.o, 'one');
+    this.setState({ pop: Object.assign({}, p, { exp: true, focusDesc: true, y: clamp(p.y, 72, Math.max(72, innerHeight - 640)) }) });
+  }
+  startEvDraft(o, scope) {
+    const { ev } = o; const m = masterOf(o); const useM = scope === 'series' && m;
+    const st = useM ? (m.allDay ? parseDkey(m.start) : new Date(m.start)) : o.start; const en = useM ? (m.allDay ? parseDkey(m.end) : new Date(m.end)) : o.end;
+    const allDay = useM ? m.allDay : ev.allDay; const last = allDay ? addDays(en, -1) : en;
+    const times = { allDay, sd: dkey(st), st: allDay ? '09:00' : fmtTime(st), ed: dkey(allDay && last < st ? st : last), et: allDay ? '10:00' : fmtTime(en), rep: (ev.rrule || ev.masterId) ? (useM ? 'KEEP' : 'NA') : '' };
+    if (!this.evDraft) {
+      this.evDraft = Object.assign({ scope, title: ev.title === '(Sin título)' ? '' : ev.title, desc: descText(ev.description || ''), loc: ev.location || '', color: ev.colorId || '' }, times);
+      this.evInit = Object.assign({}, this.evDraft);
+    } else { Object.assign(this.evDraft, times, { scope }); Object.assign(this.evInit, times, { scope }); }
+  }
+  evDraftSet(p) { Object.assign(this.evDraft, p); this.forceUpdate(); }
+  async commitEvent(o, d, i0) {
+    if (!d || !i0 || !canEditCal(o.c)) return;
+    const body = {}; const v = d;
+    if (v.title !== i0.title && v.title.trim()) body.summary = v.title.trim();
+    if (v.loc !== i0.loc) body.location = v.loc;
+    if (v.desc !== i0.desc) body.description = v.desc;
+    if (v.color !== i0.color) body.colorId = v.color || null;
+    if (['allDay', 'sd', 'st', 'ed', 'et'].some(k => v[k] !== i0[k])) {
+      const sw = v.allDay !== i0.allDay;
+      if (v.allDay) { const ed = v.ed < v.sd ? v.sd : v.ed; body.start = { date: v.sd }; body.end = { date: dkey(addDays(parseDkey(ed), 1)) }; if (sw) { body.start.dateTime = null; body.start.timeZone = null; body.end.dateTime = null; body.end.timeZone = null; } }
+      else {
+        let ed = v.ed, et = v.et; if (ed + 'T' + et < v.sd + 'T' + v.st) { ed = v.sd; et = v.st; }
+        body.start = { dateTime: `${v.sd}T${v.st}:00`, timeZone: TZ }; body.end = { dateTime: `${ed}T${et}:00`, timeZone: TZ }; if (sw) { body.start.date = null; body.end.date = null; }
+      }
+    }
+    if (v.rep !== 'KEEP' && v.rep !== 'NA' && v.rep !== i0.rep) body.recurrence = v.rep ? ['RRULE:FREQ=' + v.rep] : [];
+    if (!Object.keys(body).length) return;
+    try { await gWrite('update', o.c.gid, targetId(o, d.scope), body); this.toast('Cambios guardados en Google Calendar'); }
+    catch (e) { this.toast('No se pudo guardar: ' + e.message); }
+  }
+  closePop(silent) {
+    const p = this.state.pop; if (!p) return;
+    if (p.kind === 'event' && this.evDraft) { const o = p.o, d = this.evDraft, i0 = this.evInit; this.evDraft = null; this.evInit = null; this.commitEvent(o, d, i0); }
+    if (!silent) this.setState({ pop: null });
+  }
+  popView() {
+    const s = this.state, p = s.pop; if (!p) return null;
+    const inFv = !!s.fv; const W = p.exp ? 340 : 300;
+    const lbl = 'font-size:12px;font-weight:600;color:#8B95A3';
+    const fld = 'height:40px;padding:0 10px;border:1px solid #1F252E;border-radius:8px;background:#12161C;color:#E6E9EE;font-size:13px;outline:none;width:100%';
+    const row = (icon, txt) => html`<div style="display:flex;align-items:center;gap:10px;font-size:13px;color:#AEB6C2">${svg(icon, { s: 15, c: '#8B95A3' })}<span>${txt}</span></div>`;
+    const doneBtn = (on, fn) => html`<button class="h-sec2" onClick=${fn} style="flex:1;height:40px;border:1px solid #242B34;border-radius:8px;background:#151A21;color:#E6E9EE;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;cursor:pointer;white-space:nowrap"><${Tick} on=${on} />Completada</button>`;
+    const editBtn = html`<button class="h-primary" onClick=${() => this.expandPop()} style="flex:1;height:40px;border:0;border-radius:8px;background:#6D66F0;color:#FFFFFF;font-family:var(--disp);font-weight:700;cursor:pointer">Editar</button>`;
+    const sec = (a, b) => html`<button class=${b === 'd' ? 'h-dangero' : 'h-sec2'} onClick=${a.fn} style=${`height:36px;padding:0 12px;border:1px solid ${b === 'd' ? '#3A2725' : '#242B34'};border-radius:8px;background:${b === 'd' ? 'transparent' : '#151A21'};color:${b === 'd' ? '#C9695E' : '#E6E9EE'};font-weight:500;font-size:13px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center`}>${a.t}</button>`;
+    let body = null;
+    if (p.kind === 'task') {
+      const t = state.tasks.find(x => x.id === p.id); if (!t) return null;
+      const wk = weekOfTask(t), mon = weekStart(wk); const u = q => this.updTask(t.id, q);
+      const dateTxt = t.date ? fmtLong(parseDkey(t.date)) : 'Sin día · semana ' + Number(wk.split('-W')[1]);
+      if (!p.exp) {
+        body = html`
+          <div style="display:flex;align-items:flex-start;gap:10px"><span class="disp" style=${`flex:1;min-width:0;font-size:18px;line-height:23px;font-weight:700;overflow-wrap:anywhere;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>${t.color ? html`<span style=${`width:10px;height:10px;margin-top:7px;flex:none;border-radius:999px;background:${t.color}`}></span>` : null}</div>
+          ${row(IC.cal, dateTxt)}
+          ${t.time ? row(IC.clock, t.time) : null}
+          <div style="display:flex;gap:6px">${doneBtn(t.done, () => u({ done: !t.done }))}${editBtn}</div>`;
+      } else {
+        const imp = t.imp || 0; const tgs = t.groups || [];
+        body = html`
+          <input class="tin" aria-label="Título" value=${t.title} onInput=${e => u({ title: e.target.value })} style="height:40px;padding:0 8px;margin:0 -8px;border:0;border-radius:8px;background:transparent;color:#E6E9EE;font-family:var(--disp);font-size:18px;font-weight:700;outline:none" />
+          <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Descripción</span>
+            <textarea data-desc="1" class="fin" rows="4" value=${t.notes || ''} onInput=${e => u({ notes: e.target.value })} placeholder="Detalles, enlaces, pasos…" style="resize:vertical;padding:10px;border:1px solid #1F252E;border-radius:8px;background:#12161C;color:#E6E9EE;font-size:13px;line-height:18px;outline:none"></textarea></label>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:12px">
+            <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Día</span>
+              <select class="fin" value=${t.date || ''} onChange=${e => u({ date: e.target.value || null, week: wk })} style=${fld}>
+                <option value="">Sin día concreto</option>
+                ${[0, 1, 2, 3, 4, 5, 6].map(j => { const d = addDays(mon, j); return html`<option value=${dkey(d)}>${DIASL[j] + ' ' + d.getDate() + ' ' + MES[d.getMonth()]}</option>`; })}
+              </select></label>
+            <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Hora</span><input class="fin" type="time" value=${t.time || ''} onInput=${e => u({ time: e.target.value })} style=${fld} /></label>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Calendario</span><select class="fin" value=${this.cOf(t)} onChange=${e => u({ cal: e.target.value })} style=${fld}>${this.cals().map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between"><span style=${lbl}>Importancia</span><span style="font-size:12px;color:#A39CFB">${['Sin definir', 'Baja', 'Normal', 'Media', 'Alta', 'Urgente'][imp]}</span></div>
+            <div style="display:flex;gap:6px">${[1, 2, 3, 4, 5].map(n => html`<button onClick=${() => u({ imp: imp === n ? 0 : n })} aria-pressed=${n <= imp} style=${`flex:1;height:34px;border-radius:8px;border:1px solid ${n <= imp ? '#6D66F0' : '#1F252E'};background:${n <= imp ? 'rgba(109,102,240,' + (0.08 + n * 0.05).toFixed(2) + ')' : '#12161C'};color:${n <= imp ? '#A39CFB' : '#8B95A3'};font-family:var(--disp);font-weight:700;cursor:pointer;transition:all .15s`}>${n}</button>`)}</div>
+          </div>
+          ${state.groups.length ? html`<div style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Grupos</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${state.groups.map(g => { const on = tgs.includes(g.id); return html`<button onClick=${() => u({ groups: on ? tgs.filter(x => x !== g.id) : tgs.concat(g.id) })} aria-pressed=${on} style=${`height:28px;padding:0 10px;border-radius:999px;border:1px solid ${on ? g.color : '#1F252E'};background:${on ? g.color + '22' : '#12161C'};opacity:${on ? 1 : 0.7};display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#E6E9EE`}><span style=${`width:8px;height:8px;border-radius:2px;background:${g.color}`}></span>${g.name || 'Sin nombre'}</button>`; })}</div></div>` : null}
+          <div style="display:flex;flex-direction:column;gap:8px"><span style=${lbl}>Color</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">${[null].concat(TCOLORS).map(c => html`<button onClick=${() => u({ color: c })} aria-label=${c ? 'Color ' + c : 'Sin color'} style=${`width:26px;height:26px;padding:0;border-radius:999px;background:${c || 'transparent'};border:2px dashed ${c ? 'transparent' : '#3A434F'};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${(t.color || null) === c ? '#E6E9EE' : 'transparent'};cursor:pointer`}></button>`)}</div></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${sec({ t: 'Eliminar', fn: () => this.delTask(t.id) }, 'd')}
+            ${inFv ? sec({ t: t.hidden ? 'Mostrar en el lienzo' : 'Ocultar', fn: () => { this.updTask(t.id, { hidden: !t.hidden }); this.setState({ pop: null }); this.toast(t.hidden ? 'Tarea devuelta al lienzo' : 'Tarea oculta · W para verlas'); } }) : null}
+            ${doneBtn(t.done, () => u({ done: !t.done }))}
+          </div>`;
+      }
+    } else {
+      const o = p.o; const ev = o.ev, c = o.c; const key = evKey(o); const done = !!state.evDone[key]; const hidden = !!state.evHidden[key];
+      const col = evColor(o); const edit = canEditCal(c); const rec = !!(ev.rrule || ev.masterId); const m = masterOf(o);
+      const timeTxt = ev.allDay ? 'Todo el día' : fmtTime(o.start) + (o.end > o.start ? ' – ' + fmtTime(o.end) : '');
+      const dayTxt = ev.allDay ? whenText(o).replace(' · todo el día', '') : fmtLong(o.start);
+      const head = html`<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8B95A3"><span style=${`width:10px;height:10px;border-radius:3px;background:${col}`}></span>${c.name}${rec ? ' · se repite' : ''}</div>`;
+      const gbtn = ev.htmlLink ? html`<a class="h-sec2" href=${ev.htmlLink} target="_blank" rel="noopener noreferrer" style="height:36px;padding:0 12px;border:1px solid #242B34;border-radius:8px;background:#151A21;color:#E6E9EE;font-weight:500;font-size:13px;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center">Abrir en Google Calendar</a>` : null;
+      if (!p.exp) {
+        body = html`${head}
+          <span class="disp" style=${`font-size:18px;line-height:23px;font-weight:700;overflow-wrap:anywhere;color:${done ? '#6B7684' : '#E6E9EE'};text-decoration:${done ? 'line-through' : 'none'}`}>${ev.title}</span>
+          ${row(IC.cal, dayTxt)}
+          ${row(IC.clock, timeTxt)}
+          <div style="display:flex;gap:6px">${doneBtn(done, () => this.toggleEvDone(o))}${editBtn}</div>`;
+      } else {
+        const d = this.evDraft || {}; const set = q => this.evDraftSet(q);
+        const ro = !edit;
+        const info = [];
+        if (rec && m && m.rrule) info.push(row(IC.repeat, describeRule(m.rrule) + (ev.masterId ? ' (esta vez está cambiada)' : '')));
+        if (/^https:\/\//i.test(ev.meet || '')) info.push(html`<div style="display:flex;align-items:center;gap:10px;font-size:13px">${svg(IC.video, { s: 15, c: '#8B95A3' })}<a href=${ev.meet} target="_blank" rel="noopener noreferrer">Unirse a la videollamada</a></div>`);
+        if (ev.attendees && ev.attendees.length) info.push(html`<div style="display:flex;gap:10px;font-size:12.5px;color:#AEB6C2">${svg(IC.people, { s: 15, c: '#8B95A3', st: 'flex:none;margin-top:2px' })}<div style="display:flex;flex-direction:column;gap:2px"><span>${ev.attendees.length} invitado${ev.attendees.length > 1 ? 's' : ''}</span>${ev.attendees.map(a => html`<span>${a.name || a.email}${a.self ? ' (tú)' : ''}<span style="color:#6B7684">${a.organizer ? ' · organiza' : ''} · ${RESP[a.status] || a.status}</span></span>`)}</div></div>`);
+        else if (ev.organizer && !ev.organizerSelf) info.push(row(IC.people, 'Organiza: ' + ev.organizer));
+        if (ev.reminders) info.push(row(IC.bell, remindersText(ev.reminders)));
+        body = html`${head}
+          ${ro ? html`<span class="disp" style="font-size:18px;line-height:23px;font-weight:700;overflow-wrap:anywhere">${ev.title}</span>`
+            : html`<input class="tin" aria-label="Título" value=${d.title} onInput=${e => set({ title: e.target.value })} style="height:40px;padding:0 8px;margin:0 -8px;border:0;border-radius:8px;background:transparent;color:#E6E9EE;font-family:var(--disp);font-size:18px;font-weight:700;outline:none" />`}
+          <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Descripción</span>
+            ${ro ? html`<div class="desc" style="font-size:13px;line-height:18px" dangerouslySetInnerHTML=${{ __html: linkify(descText(ev.description || '')) || '<span style="color:#6B7684">Sin descripción</span>' }}></div>`
+              : html`<textarea data-desc="1" class="fin" rows="4" value=${d.desc} onInput=${e => set({ desc: e.target.value })} placeholder="Detalles, enlaces…" style="resize:vertical;padding:10px;border:1px solid #1F252E;border-radius:8px;background:#12161C;color:#E6E9EE;font-size:13px;line-height:18px;outline:none"></textarea>`}</label>
+          ${ro ? html`${row(IC.cal, dayTxt)}${row(IC.clock, timeTxt)}${ev.location ? row(IC.pin, ev.location) : null}` : html`
+            ${rec && m ? html`<div style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Aplicar los cambios a</span><div style="display:flex;gap:6px">${[['one', 'Solo este'], ['series', 'Toda la serie']].map(([v, l]) => html`<button onClick=${() => { this.startEvDraft(o, v); this.forceUpdate(); }} aria-pressed=${d.scope === v} style=${`flex:1;height:32px;border-radius:8px;border:1px solid ${d.scope === v ? '#6D66F0' : '#1F252E'};background:${d.scope === v ? 'rgba(109,102,240,0.12)' : '#12161C'};color:${d.scope === v ? '#A39CFB' : '#AEB6C2'};font-size:12.5px;font-weight:600;cursor:pointer`}>${l}</button>`)}</div></div>` : null}
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#AEB6C2"><input type="checkbox" checked=${d.allDay} disabled=${d.scope === 'series'} onChange=${e => set({ allDay: e.target.checked })} style="width:16px;height:16px;margin:0;accent-color:#6D66F0" />Todo el día</label>
+            <div style=${`display:grid;grid-template-columns:${d.allDay ? '1fr' : 'minmax(0,1fr) 100px'};gap:8px 10px`}>
+              <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Empieza</span><input class="fin" type="date" value=${d.sd} onInput=${e => { const v = e.target.value; set(d.ed < v ? { sd: v, ed: v } : { sd: v }); }} style=${fld} /></label>
+              ${!d.allDay ? html`<label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Hora</span><input class="fin" type="time" value=${d.st} onInput=${e => set({ st: e.target.value })} style=${fld} /></label>` : null}
+              <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Termina</span><input class="fin" type="date" value=${d.ed} onInput=${e => set({ ed: e.target.value })} style=${fld} /></label>
+              ${!d.allDay ? html`<label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Hora</span><input class="fin" type="time" value=${d.et} onInput=${e => set({ et: e.target.value })} style=${fld} /></label>` : null}
+            </div>
+            ${d.rep !== 'NA' ? html`<label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Repetir</span><select class="fin" value=${d.rep} onChange=${e => set({ rep: e.target.value })} style=${fld}>
+              ${d.rep === 'KEEP' || (this.evInit && this.evInit.rep === 'KEEP') ? html`<option value="KEEP">Como ahora: ${m && m.rrule ? describeRule(m.rrule) : ''}</option>` : null}
+              <option value="">No se repite</option><option value="DAILY">Cada día</option><option value="WEEKLY">Cada semana</option><option value="MONTHLY">Cada mes</option><option value="YEARLY">Cada año</option></select></label>` : null}
+            <label style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Lugar</span><input class="fin" value=${d.loc} onInput=${e => set({ loc: e.target.value })} placeholder="Añadir lugar" style=${fld} /></label>`}
+          ${ev.location ? html`<a href=${'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(ev.location)} target="_blank" rel="noopener noreferrer" style="font-size:12.5px;margin-top:-6px">Ver el lugar en el mapa</a>` : null}
+          ${info}
+          ${edit ? html`<div style="display:flex;flex-direction:column;gap:8px"><span style=${lbl}>Color del evento</span><div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${[['', hex6(c.color), 'Color del calendario']].concat(Object.entries(GCOL).map(([k, v]) => [k, v.hex, v.name])).map(([k, hx, nm]) => html`<button onClick=${() => set({ color: k })} title=${nm} aria-label=${nm} style=${`width:24px;height:24px;padding:0;border:0;border-radius:999px;background:${hx};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${d.color === k ? '#E6E9EE' : 'transparent'};cursor:pointer`}></button>`)}</div></div>` : html`<span style="font-size:12px;color:#6B7684">${c.google ? 'Este calendario es de solo lectura.' : 'Calendario importado: solo lectura.'}</span>`}
+          ${p.delAsk ? html`<div style="display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:8px;background:#151A21"><span style="font-size:13px;font-weight:600">¿Qué quieres eliminar?</span><div style="display:flex;gap:6px;flex-wrap:wrap">${sec({ t: 'Solo este', fn: () => this.delEvent(o, 'one') }, 'd')}${sec({ t: 'Toda la serie', fn: () => this.delEvent(o, 'series') }, 'd')}${sec({ t: 'Cancelar', fn: () => this.setState({ pop: Object.assign({}, p, { delAsk: false }) }) })}</div></div>` : null}
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${edit ? sec({ t: 'Eliminar', fn: () => rec ? this.setState({ pop: Object.assign({}, p, { delAsk: true }) }) : this.delEvent(o, 'one') }, 'd') : null}
+            ${inFv ? sec({ t: hidden ? 'Mostrar en el lienzo' : 'Ocultar', fn: () => { this.set(st => { const mm = Object.assign({}, st.evHidden); if (hidden) delete mm[key]; else mm[key] = true; return { evHidden: mm }; }); this.closePop(); this.toast(hidden ? 'Evento devuelto al lienzo' : 'Evento oculto · W para verlos'); } }) : null}
+            ${gbtn}
+            ${sec({ t: 'Crear tarea', fn: () => { this.taskFromEvent(o); } })}
+            ${doneBtn(done, () => this.toggleEvDone(o))}
+          </div>`;
+      }
+    }
+    const top = p.exp ? clamp(p.y, 16, Math.max(16, innerHeight - 660)) : p.y;
+    return html`<div onPointerDown=${() => this.closePop()} style="position:fixed;inset:0;z-index:30;background:rgba(5,7,9,0.35)"></div>
+      <div role="dialog" aria-label=${p.kind === 'task' ? 'Tarea' : 'Evento'} data-pop="1" style=${`position:fixed;left:${clamp(p.x, 12, Math.max(12, innerWidth - W - 12))}px;top:${top}px;z-index:31;width:${W}px;max-width:calc(100vw - 24px);max-height:calc(100vh - ${top + 12}px);overflow:auto;padding:16px;border-radius:10px;background:#0E1116;border:1px solid #242B34;color:#E6E9EE;box-shadow:0 24px 56px rgba(0,0,0,0.75);display:flex;flex-direction:column;gap:12px;animation:pop .16s ease-out`}>${body}</div>`;
+  }
+  async delEvent(o, scope) {
+    if (!(o.ev.rrule || o.ev.masterId) && !confirm('¿Eliminar «' + o.ev.title + '» de Google Calendar?')) return;
+    this.evDraft = null; this.evInit = null; this.setState({ pop: null });
+    try { await gWrite('delete', o.c.gid, targetId(o, scope)); this.toast(scope === 'series' ? 'Serie eliminada de Google Calendar' : 'Evento eliminado de Google Calendar'); }
+    catch (e) { this.toast(e.message); }
+  }
   /* ----- menús de la vista día/semana ----- */
   menus() {
     const s = this.state; const out = [];
@@ -657,7 +855,7 @@ class App extends Component {
         <div style="display:flex;gap:8px;flex-wrap:wrap">${GROUP_COLORS.map(c => html`<button onClick=${() => upd({ color: c })} aria-label="Color del grupo" style=${`width:26px;height:26px;padding:0;border:0;border-radius:6px;background:${c};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${c === g.color ? '#E6E9EE' : 'transparent'};cursor:pointer`}></button>`)}</div>
         <span class="mono" style="font-size:10px;letter-spacing:.12em;color:#6B7684">DE MÁS A MENOS PRIORITARIA</span>
         <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin:-4px -6px 0">
-          ${mem.map((t, i) => html`<button class="h-raise" onClick=${e => { const r = e.currentTarget.getBoundingClientRect(); this.setState({ ge: null, dm: Object.assign({ id: t.id }, this.popPos(r)) }); }} style="display:flex;align-items:center;gap:10px;min-height:36px;padding:6px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:pointer;color:#E6E9EE">
+          ${mem.map((t, i) => html`<button class="h-raise" onClick=${e => this.openPop({ kind: 'task', id: t.id }, e.currentTarget, true)} style="display:flex;align-items:center;gap:10px;min-height:36px;padding:6px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:pointer;color:#E6E9EE">
             <span class="mono" style="width:18px;flex:none;font-size:10.5px;color:#6B7684">${i + 1}</span>
             <span style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${(calMap[this.cOf(t)] || { color: '#6B7684' }).color}`}></span>
             <span style=${`flex:1;min-width:0;font-size:13px;line-height:17px;overflow-wrap:anywhere;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
@@ -685,37 +883,10 @@ class App extends Component {
               <span style="width:28px;height:28px;border-radius:6px;border:1.5px dashed #3A434F;display:flex;align-items:center;justify-content:center;color:#8B95A3;font-size:16px;line-height:1">+</span><span style="font-size:10px;line-height:12px;color:#8B95A3">Nuevo</span></button>
           </div>
           <div style="height:1px;background:#1C2128;margin:0 0 4px"></div>
-          ${ts.length === 1 ? html`<button class="h-ctx" style=${item} onClick=${() => this.setState({ ctx: null, dm: Object.assign({ id: ids[0] }, this.popPos({ left: s.ctx.x, right: s.ctx.x, top: s.ctx.y })) })}>Detalles…</button>` : null}
+          ${ts.length === 1 ? html`<button class="h-ctx" style=${item} onClick=${() => this.openPop({ kind: 'task', id: ids[0] }, { left: s.ctx.x, right: s.ctx.x, top: s.ctx.y }, true)}>Detalles…</button>` : null}
           ${s.fv ? html`<button class="h-ctx" style=${item} onClick=${() => { const v = !allHid; this.set(st => ({ ctx: null, tasks: st.tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { hidden: v }) : t), fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv })); }}>${allHid ? 'Mostrar en el lienzo' : 'Ocultar del lienzo'}</button>` : null}
           <button class="h-ctx" style=${item} onClick=${() => this.set(st => ({ ctx: null, tasks: st.tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { done: !allDone }) : t) }))}><${Tick} on=${allDone} />Completada</button>
           <button class="h-ctxd" style=${item + ';color:#C9695E'} onClick=${() => { this.set(st => ({ ctx: null, tasks: st.tasks.filter(t => !ids.includes(t.id)), fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv })); this.toast(ts.length > 1 ? ts.length + ' tareas eliminadas' : 'Tarea eliminada'); }}>${ts.length > 1 ? 'Eliminar ' + ts.length + ' tareas' : 'Eliminar tarea'}</button>
-        </div>`);
-      }
-    }
-    if (s.dm) {
-      const t = state.tasks.find(x => x.id === s.dm.id);
-      if (t) {
-        const imp = t.imp || 0; const u = p => this.updTask(t.id, p); const tgs = t.groups || [];
-        const fld = 'height:40px;padding:0 10px;border:1px solid #1F252E;border-radius:8px;background:#12161C;color:#E6E9EE;font-size:13px;outline:none';
-        out.push(html`<div onPointerDown=${() => this.setState({ dm: null })} style="position:fixed;inset:0;z-index:32;background:rgba(5,7,9,0.35)"></div>
-        <div role="dialog" aria-label="Detalles de la tarea" style=${`position:fixed;left:${s.dm.x}px;top:${clamp(s.dm.y, 72, Math.max(72, innerHeight - 610))}px;z-index:33;width:330px;max-width:calc(100vw - 24px);max-height:calc(100vh - 84px);overflow:auto;padding:16px;border-radius:10px;background:#0E1116;border:1px solid #242B34;box-shadow:${SH};display:flex;flex-direction:column;gap:14px;animation:pop .16s ease-out`}>
-          <input class="tin" aria-label="Título" value=${t.title} onInput=${e => u({ title: e.target.value })} style="height:40px;padding:0 8px;margin:0 -8px;border:0;border-radius:8px;background:transparent;color:#E6E9EE;font-family:var(--disp);font-size:18px;font-weight:700;outline:none" />
-          <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Descripción</span>
-            <textarea class="fin" rows="4" value=${t.notes || ''} onInput=${e => u({ notes: e.target.value })} placeholder="Detalles, enlaces, pasos…" style="resize:vertical;padding:10px;border:1px solid #1F252E;border-radius:8px;background:#12161C;color:#E6E9EE;font-size:13px;line-height:18px;outline:none"></textarea></label>
-          <div style="display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px">
-            <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Hora</span><input class="fin" type="time" value=${t.time || ''} onInput=${e => u({ time: e.target.value })} style=${fld} /></label>
-            <label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Calendario</span><select class="fin" value=${this.cOf(t)} onChange=${e => u({ cal: e.target.value })} style=${fld}>${this.cals().map(c => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="display:flex;justify-content:space-between"><span style="font-size:12px;font-weight:600;color:#8B95A3">Importancia</span><span style="font-size:12px;color:#A39CFB">${['Sin definir', 'Baja', 'Normal', 'Media', 'Alta', 'Urgente'][imp]}</span></div>
-            <div style="display:flex;gap:6px">${[1, 2, 3, 4, 5].map(n => html`<button onClick=${() => u({ imp: imp === n ? 0 : n })} aria-pressed=${n <= imp} style=${`flex:1;height:36px;border-radius:8px;border:1px solid ${n <= imp ? '#6D66F0' : '#1F252E'};background:${n <= imp ? 'rgba(109,102,240,' + (0.08 + n * 0.05).toFixed(2) + ')' : '#12161C'};color:${n <= imp ? '#A39CFB' : '#8B95A3'};font-family:var(--disp);font-weight:700;cursor:pointer;transition:all .15s`}>${n}</button>`)}</div>
-          </div>
-          ${state.groups.length ? html`<div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#8B95A3">Grupos</span>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">${state.groups.map(g => { const on = tgs.includes(g.id); return html`<button onClick=${() => u({ groups: on ? tgs.filter(x => x !== g.id) : tgs.concat(g.id) })} aria-pressed=${on} style=${`height:28px;padding:0 10px;border-radius:999px;border:1px solid ${on ? g.color : '#1F252E'};background:${on ? g.color + '22' : '#12161C'};opacity:${on ? 1 : 0.7};display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;transition:all .15s;color:#E6E9EE`}><span style=${`width:8px;height:8px;border-radius:2px;background:${g.color}`}></span>${g.name || 'Sin nombre'}</button>`; })}</div></div>` : null}
-          <div style="display:flex;gap:6px">
-            <button class="h-dangero" onClick=${() => this.delTask(t.id)} style="height:40px;padding:0 12px;border:1px solid #3A2725;border-radius:8px;background:transparent;color:#C9695E;font-weight:500;cursor:pointer">Eliminar</button>
-            <button class="h-sec2" onClick=${() => u({ done: !t.done })} style="flex:1;height:40px;border:1px solid #242B34;border-radius:8px;background:#151A21;color:#E6E9EE;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;cursor:pointer"><${Tick} on=${t.done} />Completada</button>
-          </div>
         </div>`);
       }
     }
@@ -759,10 +930,10 @@ class App extends Component {
     const grpChips = usedG.map(g => chip(g.id, g.name || 'Sin nombre', g.color, grpF, 'grpF', all.filter(t => tg(t).includes(g.id)).length));
     if (usedG.length && all.some(t => !tg(t).length)) grpChips.push(chip('none', 'Sin grupo', '#6B7684', grpF, 'grpF', all.filter(t => !tg(t).length).length));
     const done = listAll.filter(t => t.done).length; const pct = listAll.length ? Math.round(done / listAll.length * 100) : 0;
-    let title, sub, events = [];
+    let title, sub, events = [], evHid = [];
     if (isDay) {
       const dd = parseDkey(f.key); const dn = DIASL[dow(dd)]; title = dn.charAt(0).toUpperCase() + dn.slice(1) + ' ' + dd.getDate(); sub = (MESL[dd.getMonth()] + ' · semana ' + isoWeek(dd).week).toUpperCase();
-      const byDay = eventsForWeek(weekKey(dd)); events = (byDay[f.key] || []).filter(it => !calF.length || calF.includes(OCC[it.i].c.id));
+      const byDay = eventsForWeek(weekKey(dd)); events = (byDay[f.key] || []).filter(it => (!calF.length || calF.includes(OCC[it.i].c.id)) && !(s.hideDone && state.evDone[evKey(OCC[it.i])])); evHid = events.filter(it => state.evHidden[evKey(OCC[it.i])]); events = events.filter(it => !!state.evHidden[evKey(OCC[it.i])] === !!f.showHidden);
     } else { const m = weekStart(f.key); title = 'Semana ' + isoWeek(m).week; sub = (rangeLbl(m) + ' · todas las tareas').toUpperCase(); }
     const n = sel.length;
     const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' tarea seleccionada' : ' tareas seleccionadas') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Q ordena · E oculta hechas · W tareas ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
@@ -802,10 +973,10 @@ class App extends Component {
         <button class="h-sec2" onClick=${() => this.setState({ fv: null, fvLive: null, ge: null, ctx: null, dm: null })} style="height:40px;padding:0 12px 0 8px;border:1px solid #242B34;border-radius:8px;background:#151A21;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;color:#E6E9EE">${svg(IC.left, { w: 2.2 })}Lienzo</button>
         <div style="display:flex;flex-direction:column;min-width:0"><span class="disp" style="font-size:21px;line-height:26px;font-weight:700;letter-spacing:-.01em;white-space:nowrap">${title}</span><span class="mono" style="font-size:10px;letter-spacing:.12em;color:#8B95A3;white-space:nowrap">${sub}</span></div>
         <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;height:4px;border-radius:999px;background:#1B212A;overflow:hidden"><span style=${`display:block;height:100%;width:${pct}%;border-radius:999px;background:#4E9B72;transition:width .4s cubic-bezier(.2,.8,.2,1)`}></span></span><span class="mono" style="font-size:11px;color:#AEB6C2">${done}/${listAll.length}</span></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;min-width:0">${events.map(it => { const o = OCC[it.i]; return html`<button class="h-ev" onClick=${() => openEvent(it.i)} style="height:30px;padding:0 10px;border:1px solid #1B212A;border-radius:999px;background:#161B22;display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;white-space:nowrap;color:#E6E9EE"><span style=${`width:7px;height:7px;border-radius:999px;background:${evColor(o)}`}></span><span class="mono" style="font-size:10.5px;color:#8B95A3">${o.ev.allDay ? 'Todo el día' : fmtTime(o.start)}</span>${o.ev.title}</button>`; })}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;min-width:0">${events.map(it => { const o = OCC[it.i]; const dn = !!state.evDone[evKey(o)]; return html`<div class="h-ev" style=${`height:32px;padding:0 10px 0 6px;border:1px ${f.showHidden ? 'dashed' : 'solid'} #1B212A;border-radius:999px;background:#161B22;display:flex;align-items:center;gap:7px;font-size:12px;white-space:nowrap;color:#E6E9EE;opacity:${dn ? 0.6 : 1}`}><${Check} on=${dn} size=${18} onClick=${() => this.toggleEvDone(o)} /><button onClick=${e => this.clickPop({ kind: 'event', o }, e.currentTarget)} onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'event', o }, e.currentTarget, true); }} style=${`display:flex;align-items:center;gap:7px;padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:12px;text-decoration:${dn ? 'line-through' : 'none'}`}><span style=${`width:7px;height:7px;border-radius:999px;background:${evColor(o)}`}></span><span class="mono" style="font-size:10.5px;color:#8B95A3">${o.ev.allDay ? 'Todo el día' : fmtTime(o.start)}</span>${o.ev.title}</button></div>`; })}</div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <input class="fin" aria-label="Nueva tarea" onKeyDown=${onAdd} placeholder="+ Nueva tarea" style="height:40px;width:200px;padding:0 12px;border:1px solid #1F252E;border-radius:8px;background:#12161C;font-size:13px" />
-          <button onClick=${() => this.setFv({ showHidden: !f.showHidden, sel: [] })} title="Tareas ocultas (W)" aria-pressed=${!!f.showHidden} style=${tb(!!f.showHidden)}>${svg(IC.archive)}Ocultas<span class="mono" style="font-size:11px;color:#8B95A3">${hiddenL.length}</span></button>
+          <button onClick=${() => this.setFv({ showHidden: !f.showHidden, sel: [] })} title="Tareas ocultas (W)" aria-pressed=${!!f.showHidden} style=${tb(!!f.showHidden)}>${svg(IC.archive)}Ocultas<span class="mono" style="font-size:11px;color:#8B95A3">${hiddenL.length + evHid.length}</span></button>
           ${this.hideBtn(true)}
           <button onClick=${() => this.fvSort()} title="Atajo: Q" aria-pressed=${!!f.sorted} style=${`height:40px;padding:0 14px;border-radius:8px;border:1px solid ${f.sorted ? '#6D66F0' : '#242B34'};background:${f.sorted ? '#6D66F0' : '#151A21'};color:${f.sorted ? '#FFFFFF' : '#E6E9EE'};font-family:var(--disp);font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;transition:all .2s cubic-bezier(.4,0,.2,1)`}>${svg(IC.tree)}${f.sorted ? 'Deshacer orden' : 'Ordenar'}</button>
         </div>
@@ -828,7 +999,7 @@ class App extends Component {
 
   /* ----- render ----- */
   render() {
-    const s = this.state; resetOcc();
+    const s = this.state; resetOcc(); this._dayKeys = {};
     const today = new Date(), tk = dkey(today), curMon = mondayOf(today), curK = weekKey(today);
     const cals = this.cals(); this._calIds = cals.map(c => c.id); const calMap = {}; cals.forEach(c => calMap[c.id] = c);
     const ctx = { curMon, tk, curK, evByWeek: {} };
@@ -857,9 +1028,9 @@ class App extends Component {
     return html`
       <div ref=${this.vpRef} onPointerDown=${e => this.onVpDown(e)} onDblClick=${e => this.onVpDbl(e)} style="position:fixed;inset:0;overflow:hidden;cursor:grab;background-color:#0B0D10;background-image:radial-gradient(circle, rgba(255,255,255,0.09) 1px, transparent 1.4px);background-size:24px 24px;touch-action:none;user-select:none">
         <div ref=${this.worldRef} style="position:absolute;left:0;top:0;transform-origin:0 0;padding:160px 600px 240px 120px;display:flex;flex-direction:column;align-items:flex-start;gap:56px;will-change:transform">
-          <button class="h-dash" data-nopan="1" onClick=${() => this.extend(-1, () => this.flyToWeek(this.weekKeys()[0]))} style="height:44px;padding:0 18px;border:1.5px dashed #2E3742;border-radius:8px;background:transparent;color:#8B95A3;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:8px">${svg(IC.arrowUp)}Cargar semana anterior</button>
+          <button class="h-dash" data-nopan="1" onClick=${() => { if (!this._panMoved) this.extend(-1, () => this.flyToWeek(this.weekKeys()[0])); }} style="height:44px;padding:0 18px;border:1.5px dashed #2E3742;border-radius:8px;background:transparent;color:#8B95A3;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:8px">${svg(IC.arrowUp)}Cargar semana anterior</button>
           ${rows}
-          <button class="h-dash" data-nopan="1" onClick=${() => this.extend(1, () => { const a = this.weekKeys(); this.flyToWeek(a[a.length - 1]); })} style="height:44px;padding:0 18px;border:1.5px dashed #2E3742;border-radius:8px;background:transparent;color:#8B95A3;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:8px">${svg(IC.arrowDown)}Cargar semana siguiente</button>
+          <button class="h-dash" data-nopan="1" onClick=${() => { if (!this._panMoved) this.extend(1, () => { const a = this.weekKeys(); this.flyToWeek(a[a.length - 1]); }); }} style="height:44px;padding:0 18px;border:1.5px dashed #2E3742;border-radius:8px;background:transparent;color:#8B95A3;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:8px">${svg(IC.arrowDown)}Cargar semana siguiente</button>
           ${state.notes.map(n => this.noteEl(n))}
         </div>
       </div>
@@ -873,7 +1044,7 @@ class App extends Component {
       </div>` : null}
       ${this.fvView(calMap)}
       ${this.menus()}
-      ${this.taskPop()}
+      ${this.popView()}
       ${s.toast ? html`<div role="status" style="position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:40;padding:10px 16px;border-radius:8px;background:#0E1116;border:1px solid #242B34;color:#E6E9EE;font-size:13px;box-shadow:0 12px 32px rgba(0,0,0,0.6);animation:rise .2s ease-out;max-width:calc(100vw - 32px)">${s.toast}</div>` : null}
     `;
   }
