@@ -5,7 +5,7 @@ const DIAS=['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'];
 const DIASL=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
 const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 const MESL=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-function blank(){return {v:2,tasks:[],goals:{},calendars:[],notes:[],groups:[],layouts:{},evDone:{},evHidden:{},dayOrder:{}};}
+function blank(){return {v:2,tasks:[],goals:{},calendars:[],notes:[],groups:[],layouts:{},evDone:{},evHidden:{},dayOrder:{},evMeta:{}};}
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.tasks))return Object.assign(blank(),s);}catch(e){}return blank();}
 let state=load();
 let storageOk=true;
@@ -290,6 +290,7 @@ const COLLS={
  groups:{get:()=>Object.fromEntries((state.groups||[]).map(g=>[g.id,g])),set:m=>{state.groups=Object.values(m);}},
  layouts:{get:()=>Object.assign({},state.layouts||{}),set:m=>{state.layouts=m;}},
  evDone:{get:()=>Object.assign({},state.evDone||{}),set:m=>{state.evDone=m;}},
+ evMeta:{get:()=>Object.assign({},state.evMeta||{}),set:m=>{state.evMeta=m;}},
  evHidden:{get:()=>Object.assign({},state.evHidden||{}),set:m=>{state.evHidden=m;}},
  dayOrder:{get:()=>Object.assign({},state.dayOrder||{}),set:m=>{state.dayOrder=m;}},
  icsCals:{get:()=>Object.fromEntries(state.calendars.filter(c=>!c.google).map(c=>[c.id,c])),set:m=>{state.calendars=state.calendars.filter(c=>c.google).concat(Object.values(m));}}

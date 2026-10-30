@@ -26,7 +26,7 @@ const dow = d => (d.getDay() + 6) % 7;
 const area = t => (t.w || 200) * (t.h || 136);
 const lsGetUI = (k, d) => { try { const v = localStorage.getItem(UI + '.' + k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } };
 const lsSetUI = (k, v) => { try { localStorage.setItem(UI + '.' + k, JSON.stringify(v)); } catch (_) {} };
-const DATA = ['tasks', 'goals', 'notes', 'groups', 'layouts', 'evDone', 'evHidden', 'dayOrder'];
+const DATA = ['tasks', 'goals', 'notes', 'groups', 'layouts', 'evDone', 'evHidden', 'dayOrder', 'evMeta'];
 const evKey = o => o.c.id + '|' + (o.ev.gid || o.ev.uid) + '|' + (o.ev.allDay ? dkey(o.start) : o.start.getTime());
 
 function treemap(vals, rect) {
@@ -74,12 +74,12 @@ class App extends Component {
     this._undo = []; this._redo = [];
     this.vpRef = { current: null }; this.worldRef = { current: null }; this.zoomRef = { current: null };
     this.searchRef = { current: null }; this.fvBoardRef = { current: null }; this.geRef = { current: null };
-    this.pts = new Map(); this._dayKeys = {};
+    this.pts = new Map(); this._dayKeys = {}; this._items = {};
   }
 
   /* ----- datos ----- */
   migrate() {
-    state.notes = state.notes || []; state.groups = state.groups || []; state.layouts = state.layouts || {}; state.evDone = state.evDone || {}; state.evHidden = state.evHidden || {}; state.dayOrder = state.dayOrder || {};
+    state.notes = state.notes || []; state.groups = state.groups || []; state.layouts = state.layouts || {}; state.evDone = state.evDone || {}; state.evHidden = state.evHidden || {}; state.dayOrder = state.dayOrder || {}; state.evMeta = state.evMeta || {};
     state.tasks = state.tasks.map(t => {
       let n = t; const i = OLD_COLORS.indexOf(t.color);
       if (i >= 0) n = Object.assign({}, n, { color: TCOLORS[i] });
@@ -89,7 +89,36 @@ class App extends Component {
     });
   }
   refresh() { this.forceUpdate(); }
-  data() { return { tasks: state.tasks, goals: state.goals, notes: state.notes, groups: state.groups, layouts: state.layouts, evDone: state.evDone, evHidden: state.evHidden, dayOrder: state.dayOrder }; }
+  // Un evento visto como elemento del lienzo (mismos campos que una tarea)
+  evItem(o) {
+    const key = evKey(o); const id = 'e:' + key; const m = state.evMeta[key] || {};
+    const it = { id, kind: 'e', o, key, title: o.ev.title, done: !!state.evDone[key], hidden: !!state.evHidden[key], groups: m.groups || [], w: m.w, h: m.h, imp: m.imp || 0, cal: o.c.id, color: evColor(o),
+      time: o.ev.allDay ? '' : fmtTime(o.start) + (o.end > o.start ? '–' + fmtTime(o.end) : ''), notes: descText(o.ev.description || ''), date: dkey(o.start) };
+    this._items[id] = it; return it;
+  }
+  itemGet(id) { return id && id.startsWith('e:') ? this._items[id] : state.tasks.find(t => t.id === id); }
+  popFor(id) { const it = this.itemGet(id); return id.startsWith('e:') ? (it ? { kind: 'event', o: it.o } : null) : { kind: 'task', id }; }
+  // Cambia tareas y eventos por igual: done, hidden, groups, w, h, imp
+  itemUpd(ids, P) {
+    ids = [].concat(ids);
+    this.set(st => {
+      const out = {}; const tIds = ids.filter(i => !i.startsWith('e:')), eIds = ids.filter(i => i.startsWith('e:'));
+      if (tIds.length) out.tasks = st.tasks.map(t => tIds.includes(t.id) ? Object.assign({}, t, typeof P === 'function' ? P(t) : P) : t);
+      if (eIds.length) {
+        const meta = Object.assign({}, st.evMeta), done = Object.assign({}, st.evDone), hid = Object.assign({}, st.evHidden);
+        eIds.forEach(id => {
+          const key = id.slice(2); const cur = { groups: (meta[key] || {}).groups || [], done: !!done[key], hidden: !!hid[key], imp: (meta[key] || {}).imp || 0 };
+          const p = typeof P === 'function' ? P(cur) : P;
+          if ('done' in p) { if (p.done) done[key] = true; else delete done[key]; }
+          if ('hidden' in p) { if (p.hidden) hid[key] = true; else delete hid[key]; }
+          const mp = {}; ['groups', 'w', 'h', 'imp'].forEach(k => { if (k in p) mp[k] = p[k]; }); if (Object.keys(mp).length) meta[key] = Object.assign({}, meta[key], mp);
+        });
+        out.evMeta = meta; out.evDone = done; out.evHidden = hid;
+      }
+      return out;
+    });
+  }
+  data() { return { tasks: state.tasks, goals: state.goals, notes: state.notes, groups: state.groups, layouts: state.layouts, evDone: state.evDone, evHidden: state.evHidden, dayOrder: state.dayOrder, evMeta: state.evMeta }; }
   set(p, cb) {
     if (typeof p === 'function') p = p(Object.assign({}, this.data(), this.state));
     if (!p) { if (cb) cb(); return; }
@@ -296,7 +325,7 @@ class App extends Component {
   toggleHide() { const v = !this.state.hideDone; this.setState({ hideDone: v }); lsSetUI('hideDone', v); this.toast(v ? 'Tareas hechas ocultas' : 'Mostrando tareas hechas'); }
 
   /* ----- vista de día / semana ----- */
-  openFV(type, key) { this.setState({ fv: { type, key, sorted: false, calF: [], grpF: [], sel: [] }, fvLive: null, mqRect: null, ge: null, ctx: null, dm: null, menu: null, pop: null }); }
+  openFV(type, key) { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); this.setState({ fv: { type, key, sorted: false, calF: [], grpF: [], sel: [] }, fvLive: null, mqRect: null, ge: null, ctx: null, dm: null, menu: null, pop: null }); }
   setFv(p) { this.setState(s => s.fv ? { fv: Object.assign({}, s.fv, p) } : null); }
   fvKey() { const f = this.state.fv; return f ? f.type[0] + ':' + f.key : ''; }
   fvSort() { this.setState(s => s.fv ? { fv: Object.assign({}, s.fv, { sorted: !s.fv.sorted }), ge: null, ctx: null } : null); }
@@ -337,14 +366,15 @@ class App extends Component {
   }
   fvUp() {
     const d = this.fd; this.fd = null; const L = this.state.fvLive;
-    if (!d.moved || !L) { this.setState({ fvLive: null }); if (!d.moved && !d.corner) { clearTimeout(this._clk); const el = d.el; this._clk = setTimeout(() => { if (!this.state.pop) this.openPop({ kind: 'task', id: d.id }, el, false); }, 230); } return; }
+    if (!d.moved || !L) { this.setState({ fvLive: null }); if (!d.moved && !d.corner) { clearTimeout(this._clk); const el = d.el; this._clk = setTimeout(() => { const w = this.popFor(d.id); if (!this.state.pop && w) this.openPop(w, el, false); }, 230); } return; }
     const vk = this.fvKey();
     this.set(s => {
       const lay = Object.assign({}, s.layouts[vk] || {}); Object.keys(L).forEach(k => { lay[k] = { x: L[k].x, y: L[k].y }; });
-      return { fvLive: null, tasks: d.corner && L[d.id] ? s.tasks.map(t => t.id === d.id ? Object.assign({}, t, { w: L[d.id].w, h: L[d.id].h }) : t) : s.tasks, layouts: Object.assign({}, s.layouts, { [vk]: lay }) };
+      return { fvLive: null, layouts: Object.assign({}, s.layouts, { [vk]: lay }) };
     });
+    if (d.corner && L[d.id]) this.itemUpd(d.id, { w: L[d.id].w, h: L[d.id].h });
   }
-  fvDbl(id, e) { if (e.target.closest('[data-nodrag]')) return; clearTimeout(this._clk); this.openPop({ kind: 'task', id }, e.currentTarget, true); }
+  fvDbl(id, e) { if (e.target.closest('[data-nodrag]')) return; clearTimeout(this._clk); const w = this.popFor(id); if (w) this.openPop(w, e.currentTarget, true); }
   openGroupMenu() {
     const f = this.state.fv; if (!f || !(f.sel || []).length) return; const S = this._fvShown || {}; const b = this.fvBoardRef.current.getBoundingClientRect();
     let x1 = 1e9, y2 = -1e9, x2 = -1e9; f.sel.forEach(k => { const c = S[k]; if (!c) return; x1 = Math.min(x1, c.x); x2 = Math.max(x2, c.x + c.w); y2 = Math.max(y2, c.y + c.h); });
@@ -352,9 +382,9 @@ class App extends Component {
   }
   createGroupFor(ids, pos) {
     const n = state.groups.length; const g = { id: uid(), name: 'Grupo ' + (n + 1), color: GROUP_COLORS[n % GROUP_COLORS.length] };
-    this.set(s => ({ groups: s.groups.concat(g), tasks: s.tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { groups: (t.groups || []).concat(g.id) }) : t), ctx: null }), () => this.openGE(g.id, pos, true));
+    this.set(s => ({ groups: s.groups.concat(g), ctx: null })); this.itemUpd(ids, it => ({ groups: (it.groups || []).concat(g.id) })); this.openGE(g.id, pos, true);
   }
-  toggleGroupFor(ids, gid, allIn) { this.set(s => ({ tasks: s.tasks.map(t => { if (!ids.includes(t.id)) return t; const gs = t.groups || []; return Object.assign({}, t, { groups: allIn ? gs.filter(x => x !== gid) : (gs.includes(gid) ? gs : gs.concat(gid)) }); }) })); }
+  toggleGroupFor(ids, gid, allIn) { this.itemUpd(ids, it => { const gs = it.groups || []; return { groups: allIn ? gs.filter(x => x !== gid) : (gs.includes(gid) ? gs : gs.concat(gid)) }; }); }
   openCtx(id, e) {
     e.preventDefault(); e.stopPropagation(); let ids = [id];
     if (this.state.fv) { const sel = this.state.fv.sel || []; if (sel.includes(id)) ids = sel; else this.setFv({ sel: [id] }); }
@@ -368,9 +398,18 @@ class App extends Component {
     const f = this.state.fv; const sel = f.sel || [];
     if (sel.length) {
       const n = sel.length, v = !f.showHidden;
-      this.set(s => ({ tasks: s.tasks.map(t => sel.includes(t.id) ? Object.assign({}, t, { hidden: v }) : t), fv: Object.assign({}, s.fv, { sel: [] }) }));
-      this.toast(v ? n + (n > 1 ? ' tareas ocultas' : ' tarea oculta') + ' · W para verlas' : n + (n > 1 ? ' tareas restauradas' : ' tarea restaurada') + ' al lienzo');
+      this.itemUpd(sel, { hidden: v }); this.setFv({ sel: [] });
+      this.toast(v ? n + (n > 1 ? ' elementos ocultos' : ' elemento oculto') + ' · W para verlos' : n + (n > 1 ? ' elementos restaurados' : ' elemento restaurado') + ' al lienzo');
     } else this.setFv({ showHidden: !f.showHidden, sel: [] });
+  }
+  async deleteItems(ts) {
+    const evs = ts.filter(t => t.kind === 'e'), tks = ts.filter(t => t.kind !== 'e');
+    if (evs.length && !confirm(evs.length === 1 ? '¿Eliminar «' + evs[0].title + '» de Google Calendar?' : '¿Eliminar ' + evs.length + ' eventos de Google Calendar?')) return;
+    const tIds = tks.map(t => t.id);
+    this.set(st => ({ ctx: null, tasks: st.tasks.filter(t => !tIds.includes(t.id)), fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv }));
+    let ok = tks.length, fail = 0;
+    for (const e of evs) { if (!canEditCal(e.o.c)) { fail++; continue; } try { await gWrite('delete', e.o.c.gid, targetId(e.o, 'one')); ok++; } catch (_) { fail++; } }
+    this.toast((ok === 1 ? '1 elemento eliminado' : ok + ' elementos eliminados') + (fail ? ' · ' + fail + ' no se pudieron borrar' : ''));
   }
   popPos(r) { const W = 320, H = 460; let x = r.right + 10; if (x + W > innerWidth - 12) x = Math.max(12, r.left - W - 10); x = clamp(x, 12, Math.max(12, innerWidth - W - 12)); const y = clamp(r.top - 10, 72, Math.max(72, innerHeight - H - 12)); return { x, y }; }
   openTask(id, e) { const r = e.currentTarget.getBoundingClientRect(); this.setState({ menu: null, pop: Object.assign({ type: 'task', id }, this.popPos(r)) }); }
@@ -386,7 +425,7 @@ class App extends Component {
   // Lista ordenada de lo que hay en un día (o en «sin fecha»): eventos y tareas mezclados.
   dayItems(ok, evItems, tasks) {
     const s = this.state; const items = [];
-    (evItems || []).forEach(it => { const o = OCC[it.i]; const key = evKey(o); const done = !!state.evDone[key]; if (s.hideDone && done) return; items.push({ k: 'e:' + key, type: 'e', it, o, key, done, def: it.sort }); });
+    (evItems || []).forEach(it => { const o = OCC[it.i]; const key = evKey(o); this.evItem(o); const done = !!state.evDone[key]; if (s.hideDone && done) return; items.push({ k: 'e:' + key, type: 'e', it, o, key, done, def: it.sort }); });
     tasks.forEach((t, j) => { if (s.hideDone && t.done) return; items.push({ k: 't:' + t.id, type: 't', t, done: t.done, def: 10000 + j }); });
     const ord = state.dayOrder[ok] || []; const idx = k => { const i = ord.indexOf(k); return i < 0 ? 1e9 : i; };
     items.sort((a, b) => (idx(a.k) - idx(b.k)) || (a.def - b.def));
@@ -437,7 +476,7 @@ class App extends Component {
   }
   evRow(item, ok) {
     const s = this.state; const o = item.o; const col = evColor(o); const done = item.done; const dp = this.dragProps(item, ok); const drag = s.dragId === item.k;
-    return html`<div key=${item.k} class="evrow2" draggable="true" onDragStart=${dp.onDragStart} onDragEnd=${dp.onDragEnd} onDragOver=${dp.onDragOver} onDrop=${dp.onDrop}
+    return html`<div key=${item.k} class="evrow2" draggable="true" onContextMenu=${e => this.openCtx('e:' + item.key, e)} onDragStart=${dp.onDragStart} onDragEnd=${dp.onDragEnd} onDragOver=${dp.onDragOver} onDrop=${dp.onDrop}
       onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'event', o }, e.currentTarget, true); }}
       style=${`display:flex;align-items:flex-start;gap:8px;width:100%;padding:7px 8px;border:1px solid #1B212A;border-radius:8px;color:#E6E9EE;cursor:grab;opacity:${drag ? 0.4 : done ? 0.6 : 1};transition:all .2s cubic-bezier(.4,0,.2,1);${dp.lineShadow}`}>
       <${Check} on=${done} onClick=${() => this.toggleEvDone(o)} />
@@ -447,10 +486,11 @@ class App extends Component {
       </span>
     </div>`;
   }
-  toggleEvDone(o) { const key = evKey(o); this.set(st => { const m = Object.assign({}, st.evDone); if (m[key]) delete m[key]; else m[key] = true; return { evDone: m }; }); }
+  toggleEvDone(o) { const key = evKey(o); this.itemUpd('e:' + key, { done: !state.evDone[key] }); }
   dayCard(dd, j, wkKey, tw, evs, tk) {
     const s = this.state; const dk = dkey(dd), isT = dk === tk, over = s.drop === dk;
-    const dT = tw.filter(t => t.date === dk), dD = dT.filter(t => t.done).length; const pct = dT.length ? Math.round(dD / dT.length * 100) : 0;
+    const dT = tw.filter(t => t.date === dk); const ek = [...new Set((evs[dk] || []).map(it => evKey(OCC[it.i])))];
+    const dTot = dT.length + ek.length, dD = dT.filter(t => t.done).length + ek.filter(k => state.evDone[k]).length; const pct = dTot ? Math.round(dD / dTot * 100) : 0;
     const items = this.dayItems(dk, evs[dk], dT);
     return html`<div key=${dk} data-day=${dk}
       onClick=${ev => { if (this._panMoved || ev.target.closest('[draggable],button,input,textarea,select')) return; this.openFV('day', dk); }}
@@ -465,7 +505,7 @@ class App extends Component {
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="width:44px;height:4px;border-radius:999px;background:#1B212A;overflow:hidden"><span style=${`display:block;height:100%;width:${pct}%;border-radius:999px;background:#4E9B72;transition:width .4s cubic-bezier(.2,.8,.2,1)`}></span></span>
-          <span class="mono" style=${`min-width:24px;text-align:right;font-size:11px;color:${dT.length && dD === dT.length ? '#4E9B72' : dT.length ? '#AEB6C2' : '#5A6472'}`}>${dD}/${dT.length}</span>
+          <span class="mono" style=${`min-width:24px;text-align:right;font-size:11px;color:${dTot && dD === dTot ? '#4E9B72' : dTot ? '#AEB6C2' : '#5A6472'}`}>${dD}/${dTot}</span>
         </div>
       </div>
       <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:8px;margin:0 -4px;padding:0 4px">
@@ -477,8 +517,10 @@ class App extends Component {
   weekRow(i, ctx) {
     const s = this.state; const { curMon, tk, curK } = ctx;
     const mon = addDays(curMon, i * 7), key = weekKey(mon), prevK = weekKey(addDays(mon, -7));
-    const tw = state.tasks.filter(t => weekOfTask(t) === key); const done = tw.filter(t => t.done).length; const pct = tw.length ? Math.round(done / tw.length * 100) : 0;
+    const tw = state.tasks.filter(t => weekOfTask(t) === key);
     const evs = eventsForWeek(key); ctx.evByWeek[key] = evs;
+    const wek = [...new Set(Object.values(evs).flat().map(it => evKey(OCC[it.i])))];
+    const wTot = tw.length + wek.length, done = tw.filter(t => t.done).length + wek.filter(k => state.evDone[k]).length; const pct = wTot ? Math.round(done / wTot * 100) : 0; ctx.stats[key] = pct;
     const pendN = i >= 0 ? state.tasks.filter(t => weekOfTask(t) === prevK && !t.done).length : 0;
     const isCur = key === curK; const sun = addDays(mon, 6); const showWE = lsGetUI('weekend', true);
     const bk = 'b:' + key, bOver = s.drop === bk, bt = tw.filter(t => !t.date); const bItems = this.dayItems(bk, null, bt);
@@ -496,7 +538,7 @@ class App extends Component {
         <div style="display:flex;flex-direction:column;gap:2px"><span class="disp" style=${big}>${sun.getDate()}</span><span style="font-size:12px;color:#8B95A3">dom · ${MES[sun.getMonth()]}</span></div>
         <div style="height:1px;background:#1B212A"></div>
         <div style="display:flex;flex-direction:column;gap:2px">
-          <span class="disp" style="font-size:26px;line-height:30px;font-weight:600;letter-spacing:-.02em">${done}<span style="color:#6B7684">/${tw.length}</span></span>
+          <span class="disp" style="font-size:26px;line-height:30px;font-weight:600;letter-spacing:-.02em">${done}<span style="color:#6B7684">/${wTot}</span></span>
           <span class="mono" style="font-size:11px;color:#4E9B72">${pct}%</span>
         </div>
         ${pendN > 0 ? html`<button data-own="1" class="h-tint2" onClick=${() => { this.set(st => ({ tasks: st.tasks.map(t => weekOfTask(t) === prevK && !t.done ? Object.assign({}, t, { date: null, week: key }) : t) })); this.toast(pendN + ' pendientes movidas a «sin fecha»'); }} style="padding:7px 8px;border:0;border-radius:6px;background:rgba(109,102,240,0.08);color:#A39CFB;font-size:11.5px;font-weight:600;text-align:left;cursor:pointer;line-height:15px">Traer ${pendN} pendientes</button>` : null}
@@ -820,6 +862,12 @@ class App extends Component {
           ${info}
           ${edit ? html`<div style="display:flex;flex-direction:column;gap:8px"><span style=${lbl}>Color del evento</span><div style="display:flex;gap:8px;flex-wrap:wrap">
             ${[['', hex6(c.color), 'Color del calendario']].concat(Object.entries(GCOL).map(([k, v]) => [k, v.hex, v.name])).map(([k, hx, nm]) => html`<button onClick=${() => set({ color: k })} title=${nm} aria-label=${nm} style=${`width:24px;height:24px;padding:0;border:0;border-radius:999px;background:${hx};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${d.color === k ? '#E6E9EE' : 'transparent'};cursor:pointer`}></button>`)}</div></div>` : html`<span style="font-size:12px;color:#6B7684">${c.google ? 'Este calendario es de solo lectura.' : 'Calendario importado: solo lectura.'}</span>`}
+          ${(() => { const id = 'e:' + key; const em = state.evMeta[key] || {}; const imp = em.imp || 0; const tgs = em.groups || []; return html`
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between"><span style=${lbl}>Importancia</span><span style="font-size:12px;color:#A39CFB">${['Sin definir', 'Baja', 'Normal', 'Media', 'Alta', 'Urgente'][imp]}</span></div>
+            <div style="display:flex;gap:6px">${[1, 2, 3, 4, 5].map(n => html`<button onClick=${() => this.itemUpd(id, { imp: imp === n ? 0 : n })} aria-pressed=${n <= imp} style=${`flex:1;height:34px;border-radius:8px;border:1px solid ${n <= imp ? '#6D66F0' : '#1F252E'};background:${n <= imp ? 'rgba(109,102,240,' + (0.08 + n * 0.05).toFixed(2) + ')' : '#12161C'};color:${n <= imp ? '#A39CFB' : '#8B95A3'};font-family:var(--disp);font-weight:700;cursor:pointer`}>${n}</button>`)}</div>
+          </div>
+          ${state.groups.length ? html`<div style="display:flex;flex-direction:column;gap:6px"><span style=${lbl}>Grupos</span><div style="display:flex;gap:6px;flex-wrap:wrap">${state.groups.map(g => { const on = tgs.includes(g.id); return html`<button onClick=${() => this.itemUpd(id, { groups: on ? tgs.filter(x => x !== g.id) : tgs.concat(g.id) })} aria-pressed=${on} style=${`height:28px;padding:0 10px;border-radius:999px;border:1px solid ${on ? g.color : '#1F252E'};background:${on ? g.color + '22' : '#12161C'};opacity:${on ? 1 : 0.7};display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#E6E9EE`}><span style=${`width:8px;height:8px;border-radius:2px;background:${g.color}`}></span>${g.name || 'Sin nombre'}</button>`; })}</div></div>` : null}`; })()}
           ${p.delAsk ? html`<div style="display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:8px;background:#151A21"><span style="font-size:13px;font-weight:600">¿Qué quieres eliminar?</span><div style="display:flex;gap:6px;flex-wrap:wrap">${sec({ t: 'Solo este', fn: () => this.delEvent(o, 'one') }, 'd')}${sec({ t: 'Toda la serie', fn: () => this.delEvent(o, 'series') }, 'd')}${sec({ t: 'Cancelar', fn: () => this.setState({ pop: Object.assign({}, p, { delAsk: false }) }) })}</div></div>` : null}
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${edit ? sec({ t: 'Eliminar', fn: () => rec ? this.setState({ pop: Object.assign({}, p, { delAsk: true }) }) : this.delEvent(o, 'one') }, 'd') : null}
@@ -846,7 +894,7 @@ class App extends Component {
     const gMap = {}; state.groups.forEach(g => { gMap[g.id] = g; }); const calMap = {}; this.cals().forEach(c => { calMap[c.id] = c; });
     if (s.ge && gMap[s.ge.gid]) {
       const g = gMap[s.ge.gid];
-      const mem = state.tasks.filter(t => (t.groups || []).includes(g.id)).sort((p, q) => area(q) - area(p)); const mx = mem.length ? area(mem[0]) : 1;
+      const mem = state.tasks.filter(t => (t.groups || []).includes(g.id)).concat(Object.values(this._items).filter(it => (it.groups || []).includes(g.id))).sort((p, q) => area(q) - area(p)); const mx = mem.length ? area(mem[0]) : 1;
       const upd = p => this.set(st => ({ groups: st.groups.map(x => x.id === g.id ? Object.assign({}, x, p) : x) }));
       out.push(html`<div onPointerDown=${() => this.setState({ ge: null })} style="position:fixed;inset:0;z-index:32;background:rgba(5,7,9,0.35)"></div>
       <div role="dialog" aria-label="Grupo" style=${`position:fixed;left:${s.ge.x}px;top:${s.ge.y}px;z-index:33;width:320px;max-height:calc(100vh - 96px);padding:14px;border-radius:10px;background:#0E1116;border:1px solid #242B34;box-shadow:${SH};display:flex;flex-direction:column;gap:12px;animation:pop .16s ease-out`}>
@@ -855,25 +903,25 @@ class App extends Component {
         <div style="display:flex;gap:8px;flex-wrap:wrap">${GROUP_COLORS.map(c => html`<button onClick=${() => upd({ color: c })} aria-label="Color del grupo" style=${`width:26px;height:26px;padding:0;border:0;border-radius:6px;background:${c};box-shadow:0 0 0 2px #0E1116, 0 0 0 4px ${c === g.color ? '#E6E9EE' : 'transparent'};cursor:pointer`}></button>`)}</div>
         <span class="mono" style="font-size:10px;letter-spacing:.12em;color:#6B7684">DE MÁS A MENOS PRIORITARIA</span>
         <div data-scroll="1" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;margin:-4px -6px 0">
-          ${mem.map((t, i) => html`<button class="h-raise" onClick=${e => this.openPop({ kind: 'task', id: t.id }, e.currentTarget, true)} style="display:flex;align-items:center;gap:10px;min-height:36px;padding:6px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:pointer;color:#E6E9EE">
+          ${mem.map((t, i) => html`<button class="h-raise" onClick=${e => { const w = this.popFor(t.id); if (w) this.openPop(w, e.currentTarget, true); }} style="display:flex;align-items:center;gap:10px;min-height:36px;padding:6px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:pointer;color:#E6E9EE">
             <span class="mono" style="width:18px;flex:none;font-size:10.5px;color:#6B7684">${i + 1}</span>
-            <span style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${(calMap[this.cOf(t)] || { color: '#6B7684' }).color}`}></span>
+            <span style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${(calMap[t.kind === 'e' ? t.cal : this.cOf(t)] || { color: '#6B7684' }).color}`}></span>
             <span style=${`flex:1;min-width:0;font-size:13px;line-height:17px;overflow-wrap:anywhere;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
             <span style=${`width:${Math.round(8 + 40 * area(t) / mx)}px;height:4px;flex:none;border-radius:999px;background:${g.color}`}></span>
           </button>`)}
           ${!mem.length ? html`<span style="padding:8px 6px;font-size:12.5px;color:#6B7684">Este grupo aún no tiene tareas.</span>` : null}
         </div>
-        <button class="h-dangert" onClick=${() => { this.set(st => ({ groups: st.groups.filter(x => x.id !== g.id), tasks: st.tasks.map(t => (t.groups || []).includes(g.id) ? Object.assign({}, t, { groups: t.groups.filter(x => x !== g.id) }) : t), ge: null })); this.toast('Grupo eliminado'); }} style="align-self:flex-start;height:32px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:#C9695E;font-size:12.5px;cursor:pointer">Eliminar grupo</button>
+        <button class="h-dangert" onClick=${() => { this.set(st => { const em = {}; Object.entries(st.evMeta).forEach(([k, v]) => { em[k] = (v.groups || []).includes(g.id) ? Object.assign({}, v, { groups: v.groups.filter(x => x !== g.id) }) : v; }); return { groups: st.groups.filter(x => x.id !== g.id), tasks: st.tasks.map(t => (t.groups || []).includes(g.id) ? Object.assign({}, t, { groups: t.groups.filter(x => x !== g.id) }) : t), evMeta: em, ge: null }; }); this.toast('Grupo eliminado'); }} style="align-self:flex-start;height:32px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:#C9695E;font-size:12.5px;cursor:pointer">Eliminar grupo</button>
       </div>`);
     }
     if (s.ctx) {
-      const ts = s.ctx.ids.map(id => state.tasks.find(t => t.id === id)).filter(Boolean); const ids = ts.map(t => t.id);
+      const ts = s.ctx.ids.map(id => this.itemGet(id)).filter(Boolean); const ids = ts.map(t => t.id);
       if (ts.length) {
         const allDone = ts.every(t => t.done); const allHid = ts.every(t => t.hidden);
         const item = 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;background:transparent;border:0;border-radius:6px;text-align:left;font-size:13px;color:#AEB6C2;cursor:pointer';
         out.push(html`<div onPointerDown=${() => this.setState({ ctx: null })} onContextMenu=${e => { e.preventDefault(); this.setState({ ctx: null }); }} style="position:fixed;inset:0;z-index:34"></div>
         <div role="menu" onContextMenu=${e => { e.preventDefault(); this.setState({ ctx: null }); }} style=${`position:fixed;left:${s.ctx.x}px;top:${s.ctx.y}px;z-index:35;min-width:190px;max-width:300px;padding:6px;border-radius:10px;background:#0E1116;border:1px solid #242B34;box-shadow:0 18px 44px -14px rgba(0,0,0,0.75);display:flex;flex-direction:column;animation:pop .12s ease-out`}>
-          <div class="mono" style="padding:6px 10px 7px;margin-bottom:6px;border-bottom:1px solid #1C2128;font-size:10px;letter-spacing:.12em;color:#6B7684;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ts.length > 1 ? ts.length + ' tareas' : ts[0].title}</div>
+          <div class="mono" style="padding:6px 10px 7px;margin-bottom:6px;border-bottom:1px solid #1C2128;font-size:10px;letter-spacing:.12em;color:#6B7684;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ts.length > 1 ? ts.length + ' elementos' : ts[0].title}</div>
           <span class="mono" style="padding:0 10px 4px;font-size:10px;letter-spacing:.12em;color:#6B7684">GRUPOS</span>
           <div style="display:flex;flex-wrap:wrap;gap:2px;padding:0 4px 6px">
             ${state.groups.map(g => { const n = ts.filter(t => (t.groups || []).includes(g.id)).length; const all = n === ts.length; return html`<button class="h-raise" onClick=${() => this.toggleGroupFor(ids, g.id, all)} title=${g.name} style="width:50px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:5px 0 4px;border:0;border-radius:6px;background:transparent;cursor:pointer">
@@ -883,10 +931,10 @@ class App extends Component {
               <span style="width:28px;height:28px;border-radius:6px;border:1.5px dashed #3A434F;display:flex;align-items:center;justify-content:center;color:#8B95A3;font-size:16px;line-height:1">+</span><span style="font-size:10px;line-height:12px;color:#8B95A3">Nuevo</span></button>
           </div>
           <div style="height:1px;background:#1C2128;margin:0 0 4px"></div>
-          ${ts.length === 1 ? html`<button class="h-ctx" style=${item} onClick=${() => this.openPop({ kind: 'task', id: ids[0] }, { left: s.ctx.x, right: s.ctx.x, top: s.ctx.y }, true)}>Detalles…</button>` : null}
-          ${s.fv ? html`<button class="h-ctx" style=${item} onClick=${() => { const v = !allHid; this.set(st => ({ ctx: null, tasks: st.tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { hidden: v }) : t), fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv })); }}>${allHid ? 'Mostrar en el lienzo' : 'Ocultar del lienzo'}</button>` : null}
-          <button class="h-ctx" style=${item} onClick=${() => this.set(st => ({ ctx: null, tasks: st.tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { done: !allDone }) : t) }))}><${Tick} on=${allDone} />Completada</button>
-          <button class="h-ctxd" style=${item + ';color:#C9695E'} onClick=${() => { this.set(st => ({ ctx: null, tasks: st.tasks.filter(t => !ids.includes(t.id)), fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv })); this.toast(ts.length > 1 ? ts.length + ' tareas eliminadas' : 'Tarea eliminada'); }}>${ts.length > 1 ? 'Eliminar ' + ts.length + ' tareas' : 'Eliminar tarea'}</button>
+          ${ts.length === 1 ? html`<button class="h-ctx" style=${item} onClick=${() => { const w = this.popFor(ids[0]); if (w) this.openPop(w, { left: s.ctx.x, right: s.ctx.x, top: s.ctx.y }, true); }}>Detalles…</button>` : null}
+          ${s.fv ? html`<button class="h-ctx" style=${item} onClick=${() => { this.itemUpd(ids, { hidden: !allHid }); this.setState(st => ({ ctx: null, fv: st.fv ? Object.assign({}, st.fv, { sel: [] }) : st.fv })); }}>${allHid ? 'Mostrar en el lienzo' : 'Ocultar del lienzo'}</button>` : null}
+          <button class="h-ctx" style=${item} onClick=${() => { this.itemUpd(ids, { done: !allDone }); this.setState({ ctx: null }); }}><${Tick} on=${allDone} />Completada</button>
+          <button class="h-ctxd" style=${item + ';color:#C9695E'} onClick=${() => this.deleteItems(ts)}>${ts.length > 1 ? 'Eliminar ' + ts.length + ' elementos' : ts[0].kind === 'e' ? 'Eliminar evento' : 'Eliminar tarea'}</button>
         </div>`);
       }
     }
@@ -898,8 +946,10 @@ class App extends Component {
     const s = this.state, f = s.fv; if (!f) return null;
     const isDay = f.type === 'day'; const vk = this.fvKey(); const lay = state.layouts[vk] || {};
     const gMap = {}; state.groups.forEach(g => gMap[g.id] = g);
-    const tg = t => (t.groups || []).filter(g => gMap[g]), cOf = t => this.cOf(t); const inG = (t, arr) => { const g = tg(t); return g.length ? g.some(x => arr.includes(x)) : arr.includes('none'); };
-    const all = state.tasks.filter(t => isDay ? t.date === f.key : weekOfTask(t) === f.key);
+    const tg = t => (t.groups || []).filter(g => gMap[g]), cOf = t => t.kind === 'e' ? t.cal : this.cOf(t); const inG = (t, arr) => { const g = tg(t); return g.length ? g.some(x => arr.includes(x)) : arr.includes('none'); };
+    const evMap = {}; const byDayF = eventsForWeek(isDay ? weekKey(parseDkey(f.key)) : f.key);
+    Object.entries(byDayF).forEach(([dk, its]) => { if (isDay && dk !== f.key) return; its.forEach(it => { const o = OCC[it.i]; const k = evKey(o); if (!evMap[k]) evMap[k] = this.evItem(o); }); });
+    const all = Object.values(evMap).sort((a, c) => a.o.start - c.o.start).concat(state.tasks.filter(t => isDay ? t.date === f.key : weekOfTask(t) === f.key));
     const calF = f.calF || [], grpF = f.grpF || [], sel = f.sel || [];
     const listAll = all.filter(t => !(s.hideDone && t.done) && (!calF.length || calF.includes(cOf(t))) && (!grpF.length || inG(t, grpF)));
     const hiddenL = listAll.filter(t => t.hidden); const list = f.showHidden ? hiddenL : listAll.filter(t => !t.hidden);
@@ -930,13 +980,13 @@ class App extends Component {
     const grpChips = usedG.map(g => chip(g.id, g.name || 'Sin nombre', g.color, grpF, 'grpF', all.filter(t => tg(t).includes(g.id)).length));
     if (usedG.length && all.some(t => !tg(t).length)) grpChips.push(chip('none', 'Sin grupo', '#6B7684', grpF, 'grpF', all.filter(t => !tg(t).length).length));
     const done = listAll.filter(t => t.done).length; const pct = listAll.length ? Math.round(done / listAll.length * 100) : 0;
-    let title, sub, events = [], evHid = [];
+    let title, sub;
     if (isDay) {
       const dd = parseDkey(f.key); const dn = DIASL[dow(dd)]; title = dn.charAt(0).toUpperCase() + dn.slice(1) + ' ' + dd.getDate(); sub = (MESL[dd.getMonth()] + ' · semana ' + isoWeek(dd).week).toUpperCase();
-      const byDay = eventsForWeek(weekKey(dd)); events = (byDay[f.key] || []).filter(it => (!calF.length || calF.includes(OCC[it.i].c.id)) && !(s.hideDone && state.evDone[evKey(OCC[it.i])])); evHid = events.filter(it => state.evHidden[evKey(OCC[it.i])]); events = events.filter(it => !!state.evHidden[evKey(OCC[it.i])] === !!f.showHidden);
-    } else { const m = weekStart(f.key); title = 'Semana ' + isoWeek(m).week; sub = (rangeLbl(m) + ' · todas las tareas').toUpperCase(); }
+
+    } else { const m = weekStart(f.key); title = 'Semana ' + isoWeek(m).week; sub = (rangeLbl(m) + ' · todo lo de la semana').toUpperCase(); }
     const n = sel.length;
-    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' tarea seleccionada' : ' tareas seleccionadas') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Q ordena · E oculta hechas · W tareas ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
+    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' elemento seleccionado' : ' elementos seleccionados') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Q ordena · E oculta hechas · W tareas ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
     const onAdd = e => { const v = e.target.value.trim(); if (e.key === 'Enter' && v) { const ex = {}; if (calF.length === 1) ex.cal = calF[0]; if (grpF.length === 1 && grpF[0] !== 'none') ex.groups = [grpF[0]]; isDay ? this.addTask(v, f.key, weekKey(parseDkey(f.key)), ex) : this.addTask(v, null, f.key, ex); e.target.value = ''; } };
     const corner = (c, pos, mark, col, cur) => html`<span data-corner=${c} style=${`position:absolute;${pos};width:18px;height:18px;cursor:${cur}`}><span style=${`position:absolute;${mark};width:8px;height:8px;border-color:${col}`}></span></span>`;
     const card = (t, i) => {
@@ -946,7 +996,7 @@ class App extends Component {
       return html`<div key=${t.id} data-card="1" onPointerDown=${e => this.fvDown(t.id, e)} onDblClick=${e => this.fvDbl(t.id, e)} onContextMenu=${e => this.openCtx(t.id, e)}
         style=${`position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;z-index:${live ? 99999 : i + 1};padding:12px 14px;border-radius:10px;background:#12161C;border:1px ${f.showHidden ? 'dashed' : 'solid'} ${live || isSel ? '#6D66F0' : t.color ? t.color + '80' : '#1F252E'};box-shadow:${isSel ? '0 0 0 2px rgba(109,102,240,0.4), ' + SH : SH};opacity:${t.done ? 0.55 : 1};cursor:${f.sorted ? 'pointer' : 'grab'};display:flex;flex-direction:column;gap:8px;overflow:hidden;transition:${live ? 'none' : 'left ' + ease + ', top ' + ease + ', width ' + ease + ', height ' + ease + ', opacity .2s, border-color .2s, box-shadow .2s'};touch-action:none`}>
         <div style="display:flex;align-items:flex-start;gap:10px;min-width:0">
-          <${Check} on=${t.done} size=${20} nodrag=${true} onClick=${() => this.updTask(t.id, { done: !t.done })} />
+          <${Check} on=${t.done} size=${20} nodrag=${true} onClick=${() => this.itemUpd(t.id, { done: !t.done })} />
           <span class="disp" style=${`flex:1;min-width:0;font-weight:600;font-size:${fs}px;line-height:1.2;letter-spacing:-.01em;overflow-wrap:anywhere;color:${t.done ? '#6B7684' : '#E6E9EE'};text-decoration:${t.done ? 'line-through' : 'none'}`}>${t.title}</span>
         </div>
         ${t.notes && r.h > 130 ? html`<span style="font-size:12.5px;line-height:17px;color:#8B95A3;overflow:hidden;min-height:0">${t.notes}</span>` : null}
@@ -954,7 +1004,7 @@ class App extends Component {
         <div style="margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0">
           <span style="display:flex;align-items:center;gap:6px;min-width:0"><span style=${`width:7px;height:7px;flex:none;border-radius:999px;background:${(calMap[cOf(t)] || { color: '#6B7684' }).color}`}></span><span class="mono" style="font-size:10px;letter-spacing:.1em;color:#6B7684;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${meta}</span></span>
           <span style="display:flex;align-items:center;gap:8px;flex:none">
-            ${f.showHidden ? html`<button class="h-show" data-nodrag="1" onClick=${() => { this.updTask(t.id, { hidden: false }); this.toast('Tarea restaurada al lienzo'); }} title="Mostrar en el lienzo" aria-label="Mostrar en el lienzo" style="width:26px;height:26px;margin:-4px 0;padding:0;border:0;border-radius:6px;background:transparent;color:#AEB6C2;cursor:pointer;display:flex;align-items:center;justify-content:center">${svg(IC.eyeOff, { s: 15 })}</button>` : null}
+            ${f.showHidden ? html`<button class="h-show" data-nodrag="1" onClick=${() => { this.itemUpd(t.id, { hidden: false }); this.toast('Devuelta al lienzo'); }} title="Mostrar en el lienzo" aria-label="Mostrar en el lienzo" style="width:26px;height:26px;margin:-4px 0;padding:0;border:0;border-radius:6px;background:transparent;color:#AEB6C2;cursor:pointer;display:flex;align-items:center;justify-content:center">${svg(IC.eyeOff, { s: 15 })}</button>` : null}
             ${t.time ? html`<span class="mono" style="font-size:11px;color:#AEB6C2">${t.time}</span>` : null}
             ${imp > 0 ? html`<span style="font-size:8px;letter-spacing:1px;color:#A39CFB" aria-label=${'Importancia ' + imp}>${'●'.repeat(imp) + '○'.repeat(5 - imp)}</span>` : null}
             ${t.color ? html`<span style=${`width:8px;height:8px;flex:none;border-radius:999px;background:${t.color}`}></span>` : null}
@@ -973,10 +1023,10 @@ class App extends Component {
         <button class="h-sec2" onClick=${() => this.setState({ fv: null, fvLive: null, ge: null, ctx: null, dm: null })} style="height:40px;padding:0 12px 0 8px;border:1px solid #242B34;border-radius:8px;background:#151A21;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap;color:#E6E9EE">${svg(IC.left, { w: 2.2 })}Lienzo</button>
         <div style="display:flex;flex-direction:column;min-width:0"><span class="disp" style="font-size:21px;line-height:26px;font-weight:700;letter-spacing:-.01em;white-space:nowrap">${title}</span><span class="mono" style="font-size:10px;letter-spacing:.12em;color:#8B95A3;white-space:nowrap">${sub}</span></div>
         <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;height:4px;border-radius:999px;background:#1B212A;overflow:hidden"><span style=${`display:block;height:100%;width:${pct}%;border-radius:999px;background:#4E9B72;transition:width .4s cubic-bezier(.2,.8,.2,1)`}></span></span><span class="mono" style="font-size:11px;color:#AEB6C2">${done}/${listAll.length}</span></div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;min-width:0">${events.map(it => { const o = OCC[it.i]; const dn = !!state.evDone[evKey(o)]; return html`<div class="h-ev" style=${`height:32px;padding:0 10px 0 6px;border:1px ${f.showHidden ? 'dashed' : 'solid'} #1B212A;border-radius:999px;background:#161B22;display:flex;align-items:center;gap:7px;font-size:12px;white-space:nowrap;color:#E6E9EE;opacity:${dn ? 0.6 : 1}`}><${Check} on=${dn} size=${18} onClick=${() => this.toggleEvDone(o)} /><button onClick=${e => this.clickPop({ kind: 'event', o }, e.currentTarget)} onDblClick=${e => { clearTimeout(this._clk); this.openPop({ kind: 'event', o }, e.currentTarget, true); }} style=${`display:flex;align-items:center;gap:7px;padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:12px;text-decoration:${dn ? 'line-through' : 'none'}`}><span style=${`width:7px;height:7px;border-radius:999px;background:${evColor(o)}`}></span><span class="mono" style="font-size:10.5px;color:#8B95A3">${o.ev.allDay ? 'Todo el día' : fmtTime(o.start)}</span>${o.ev.title}</button></div>`; })}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;min-width:0"></div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <input class="fin" aria-label="Nueva tarea" onKeyDown=${onAdd} placeholder="+ Nueva tarea" style="height:40px;width:200px;padding:0 12px;border:1px solid #1F252E;border-radius:8px;background:#12161C;font-size:13px" />
-          <button onClick=${() => this.setFv({ showHidden: !f.showHidden, sel: [] })} title="Tareas ocultas (W)" aria-pressed=${!!f.showHidden} style=${tb(!!f.showHidden)}>${svg(IC.archive)}Ocultas<span class="mono" style="font-size:11px;color:#8B95A3">${hiddenL.length + evHid.length}</span></button>
+          <button onClick=${() => this.setFv({ showHidden: !f.showHidden, sel: [] })} title="Tareas ocultas (W)" aria-pressed=${!!f.showHidden} style=${tb(!!f.showHidden)}>${svg(IC.archive)}Ocultas<span class="mono" style="font-size:11px;color:#8B95A3">${hiddenL.length}</span></button>
           ${this.hideBtn(true)}
           <button onClick=${() => this.fvSort()} title="Atajo: Q" aria-pressed=${!!f.sorted} style=${`height:40px;padding:0 14px;border-radius:8px;border:1px solid ${f.sorted ? '#6D66F0' : '#242B34'};background:${f.sorted ? '#6D66F0' : '#151A21'};color:${f.sorted ? '#FFFFFF' : '#E6E9EE'};font-family:var(--disp);font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap;transition:all .2s cubic-bezier(.4,0,.2,1)`}>${svg(IC.tree)}${f.sorted ? 'Deshacer orden' : 'Ordenar'}</button>
         </div>
@@ -987,7 +1037,7 @@ class App extends Component {
         </div>
       </div>
       <div ref=${this.fvBoardRef} onPointerDown=${e => this.fvBoardDown(e)} style="position:relative;flex:1;min-height:0;overflow:hidden;background-color:#0B0D10;background-image:radial-gradient(circle, rgba(255,255,255,0.09) 1px, transparent 1.4px);background-size:24px 24px;user-select:none">
-        ${!list.length ? html`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#6B7684;font-size:14px">${f.showHidden ? 'No hay tareas ocultas con estos filtros. Selecciona tareas en el lienzo y pulsa W para ocultarlas.' : listAll.length ? 'Todas las tareas están ocultas. Pulsa W para verlas.' : 'Aún no hay tareas. Escribe arriba para crear la primera.'}</div>` : null}
+        ${!list.length ? html`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#6B7684;font-size:14px">${f.showHidden ? 'No hay tareas ocultas con estos filtros. Selecciona tareas en el lienzo y pulsa W para ocultarlas.' : listAll.length ? 'Todas las tareas están ocultas. Pulsa W para verlas.' : 'Aún no hay nada aquí. Escribe arriba para crear la primera tarea.'}</div>` : null}
         ${hulls.map(hh => html`<div key=${'h' + hh.g} data-hull="1" onDblClick=${e => { e.stopPropagation(); this.openGE(hh.g, { x: e.clientX, y: e.clientY }); }} title="Doble clic para editar el grupo" style=${`position:absolute;left:${hh.x}px;top:${hh.y}px;width:${hh.w}px;height:${hh.h}px;border-radius:14px;background:${hh.G.color}12;border:1.5px dashed ${hh.G.color}66;z-index:0`}><span class="disp" style=${`position:absolute;left:12px;top:6px;font-size:12.5px;font-weight:700;color:${hh.G.color};white-space:nowrap`}>${hh.G.name || 'Sin nombre'}</span></div>`)}
         ${bySize.map((t, i) => card(t, i))}
         ${f.showHidden ? html`<div class="mono" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:100000;padding:6px 12px;border-radius:999px;background:rgba(14,17,22,0.9);border:1px dashed #6D66F0;color:#A39CFB;font-size:10.5px;letter-spacing:.12em;pointer-events:none;white-space:nowrap">LIENZO DE OCULTAS · W RESTAURA LA SELECCIÓN</div>` : null}
@@ -999,15 +1049,15 @@ class App extends Component {
 
   /* ----- render ----- */
   render() {
-    const s = this.state; resetOcc(); this._dayKeys = {};
+    const s = this.state; resetOcc(); this._dayKeys = {}; this._items = {};
     const today = new Date(), tk = dkey(today), curMon = mondayOf(today), curK = weekKey(today);
     const cals = this.cals(); this._calIds = cals.map(c => c.id); const calMap = {}; cals.forEach(c => calMap[c.id] = c);
-    const ctx = { curMon, tk, curK, evByWeek: {} };
+    const ctx = { curMon, tk, curK, evByWeek: {}, stats: {} };
     const rows = []; const weeks = [];
     for (let i = s.from; i <= s.to; i++) {
       rows.push(this.weekRow(i, ctx));
       const mon = addDays(curMon, i * 7), key = weekKey(mon); const tw = state.tasks.filter(t => weekOfTask(t) === key); const dn = tw.filter(t => t.done).length;
-      weeks.push({ key, num: isoWeek(mon).week, range: rangeLbl(mon) + ' ' + addDays(mon, 6).getFullYear(), isCur: key === curK, pct: tw.length ? Math.round(dn / tw.length * 100) : 0 });
+      weeks.push({ key, num: isoWeek(mon).week, range: rangeLbl(mon) + ' ' + addDays(mon, 6).getFullYear(), isCur: key === curK, pct: ctx.stats[key] || 0 });
     }
     // búsqueda
     const q = s.q.trim().toLowerCase(); const results = [];
