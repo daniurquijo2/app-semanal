@@ -85,7 +85,7 @@ class App extends Component {
     this.cam = { x: 0, y: 0, s: 1 };
     this._undo = []; this._redo = [];
     this.vpRef = { current: null }; this.worldRef = { current: null }; this.zoomRef = { current: null };
-    this.searchRef = { current: null }; this.fvBoardRef = { current: null }; this.geRef = { current: null };
+    this.searchRef = { current: null }; this.fvBoardRef = { current: null }; this.fvWorldRef = { current: null }; this.fzRef = { current: null }; this.fcam = { x: 0, y: 0, s: 1 }; this.geRef = { current: null };
     this.pts = new Map(); this._dayKeys = {}; this._items = {};
   }
 
@@ -172,7 +172,7 @@ class App extends Component {
     this._rs = () => { this.updateFocus(); this.setState({ vw: window.innerWidth }); };
     const vp = this.vpRef.current; if (vp) vp.addEventListener('wheel', this._wheel, { passive: false });
     window.addEventListener('pointermove', this._move); window.addEventListener('pointerup', this._up); window.addEventListener('pointercancel', this._up);
-    window.addEventListener('keydown', this._key); window.addEventListener('resize', this._rs);
+    window.addEventListener('keydown', this._key); window.addEventListener('keyup', e => { if (e.code === 'Space') { this._space = false; if (this.fvBoardRef.current) this.fvBoardRef.current.style.cursor = ''; } }); window.addEventListener('resize', this._rs);
     this._pd = e => { if (this.state.menu && !(e.target.closest && e.target.closest('[data-menu]'))) this.setState({ menu: null }); };
     document.addEventListener('pointerdown', this._pd, true);
     this._wh = () => { if (this.state.ctx) this.setState({ ctx: null }); }; window.addEventListener('wheel', this._wh, { passive: true }); window.addEventListener('blur', this._wh);
@@ -185,6 +185,9 @@ class App extends Component {
   componentDidUpdate(pp, ps) {
     if (this.state.menu === 'search' && ps.menu !== 'search' && this.searchRef.current) this.searchRef.current.focus({ preventScroll: true });
     if (this.state.fv && !ps.fv) requestAnimationFrame(() => this.forceUpdate());
+    const bd = this.fvBoardRef.current;
+    if (bd && bd !== this._wheelBoard) { this._wheelBoard = bd; bd.addEventListener('wheel', e => this.onBoardWheel(e), { passive: false }); }
+    if (bd) this.applyFCam(false);
     const p = this.state.pop;
     if (p && p.focusDesc && (!ps.pop || !ps.pop.focusDesc || ps.pop !== p)) {
       const ta = document.querySelector('[data-pop] textarea[data-desc]');
@@ -290,6 +293,8 @@ class App extends Component {
     if (e.button === 1 || (e.button === 0 && !e.target.closest('[draggable="true"],input,textarea,select,[data-note],a,[data-addbox]'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
   }
   onMove(e) {
+    if (this.fpan) { this.fcam.x = this.fpan.x + e.clientX - this.fpan.sx; this.fcam.y = this.fpan.y + e.clientY - this.fpan.sy; this.applyFCam(false); return; }
+    if (this.fpinch && this.fpts && this.fpts.has(e.pointerId)) { this.fpts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, c] = [...this.fpts.values()]; if (!c) return; const r = this.fvBoardRef.current.getBoundingClientRect(); this.fZoomAt((a.x + c.x) / 2 - r.left, (a.y + c.y) / 2 - r.top, (this.fpinch.s * Math.hypot(a.x - c.x, a.y - c.y) / this.fpinch.d) / this.fcam.s, false); return; }
     if (this.fd) { this.fvMove(e); return; }
     if (this.mq) { this.fvMq(e); return; }
     if (this.pinch && this.pts.has(e.pointerId)) {
@@ -301,6 +306,8 @@ class App extends Component {
     else if (this.nd) { const d = this.nd; const nx = d.ox + (e.clientX - d.sx) / this.cam.s, ny = d.oy + (e.clientY - d.sy) / this.cam.s; this.set(s => ({ notes: s.notes.map(n => n.id === d.id ? Object.assign({}, n, { x: nx, y: ny }) : n) })); }
   }
   onUp(e) {
+    if (this.fpts && e) { this.fpts.delete(e.pointerId); if (this.fpts.size < 2) this.fpinch = null; }
+    if (this.fpan) { this.fpan = null; return; }
     if (e && this.pts.has(e.pointerId)) { this.pts.delete(e.pointerId); if (this.pts.size < 2) this.pinch = null; }
     if (this.mq) { this.mq = null; this.setState({ mqRect: null }); return; }
     if (this.fd) { this.fvUp(); return; }
@@ -314,6 +321,7 @@ class App extends Component {
     this.set(s => ({ notes: [...s.notes, n], menu: null }), () => { const ta = this.worldRef.current.querySelector(`[data-note="${n.id}"] textarea`); if (ta) ta.focus({ preventScroll: true }); });
   }
   onKey(e) {
+    if (e.code === 'Space' && this.state.fv && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) { e.preventDefault(); if (!this._space) { this._space = true; if (this.fvBoardRef.current) this.fvBoardRef.current.style.cursor = 'grab'; } return; }
     if (e.key === 'Escape' && this.state.calPick) { this.setState({ calPick: null }); return; }
     if (document.querySelector('dialog[open]')) return;
     const tag = e.target.tagName; const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
@@ -334,6 +342,9 @@ class App extends Component {
     if (this.state.fv) {
       const k = e.key;
       if (k === 'w' || k === 'W') { this.fvHideKey(); return; }
+      if (k === '+' || k === '=') { this.fZoomBtn(1.2); return; }
+      if (k === '-') { this.fZoomBtn(1 / 1.2); return; }
+      if (k === '0') { this.fFit(); return; }
       if (k === 'q' || k === 'Q') this.fvSort();
       else if ((k === 'Enter' || k === 'g' || k === 'G') && !this.state.ge && !this.state.pop && (this.state.fv.sel || []).length) { e.preventDefault(); this.openGroupMenu(); }
       return;
@@ -354,12 +365,37 @@ class App extends Component {
   toggleHide() { const v = !this.state.hideDone; this.setState({ hideDone: v }); lsSetUI('hideDone', v); this.toast(v ? 'Tareas hechas ocultas' : 'Mostrando tareas hechas'); }
 
   /* ----- vista de día / semana ----- */
-  openFV(type, key) { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); this.setState({ fv: { type, key, sorted: false, calF: [], grpF: [], sel: [] }, fvLive: null, mqRect: null, ge: null, ctx: null, dm: null, menu: null, pop: null }); }
+  openFV(type, key) { this.fcam = { x: 0, y: 0, s: 1 }; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); this.setState({ fv: { type, key, sorted: false, calF: [], grpF: [], sel: [] }, fvLive: null, mqRect: null, ge: null, ctx: null, dm: null, menu: null, pop: null }); }
   setFv(p) { this.setState(s => s.fv ? { fv: Object.assign({}, s.fv, p) } : null); }
   fvKey() { const f = this.state.fv; return f ? f.type[0] + ':' + f.key : ''; }
   fvSort() { this.setState(s => s.fv ? { fv: Object.assign({}, s.fv, { sorted: !s.fv.sorted }), ge: null, ctx: null } : null); }
-  boardPt(e) { const r = this.fvBoardRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  boardPt(e) { const r = this.fvBoardRef.current.getBoundingClientRect(), c = this.fcam; return { x: (e.clientX - r.left - c.x) / c.s, y: (e.clientY - r.top - c.y) / c.s }; }
+  applyFCam(anim) {
+    const w = this.fvWorldRef.current, b = this.fvBoardRef.current; if (!w || !b) return;
+    const { x, y, s } = this.fcam; const ease = '.5s cubic-bezier(.2,.8,.2,1)';
+    w.style.transition = anim ? 'transform ' + ease : 'none'; w.style.transform = `translate(${x}px,${y}px) scale(${s})`;
+    const P = bgPattern(s); b.style.backgroundImage = P.img;
+    b.style.transition = anim && !P.fixed ? 'background-position ' + ease + ', background-size ' + ease : 'none'; b.style.backgroundSize = P.size; b.style.backgroundPosition = P.fixed ? '0 0' : x + 'px ' + y + 'px';
+    if (this.fzRef.current) this.fzRef.current.textContent = Math.round(s * 100) + '%';
+  }
+  fZoomAt(sx, sy, f, anim) { const c = this.fcam; const ns = clamp(c.s * f, 0.15, 3); c.x = sx - (sx - c.x) * (ns / c.s); c.y = sy - (sy - c.y) * (ns / c.s); c.s = ns; this.applyFCam(anim); if (this.state.fv && this.state.fv.sorted) this.forceUpdate(); }
+  fZoomBtn(f) { const b = this.fvBoardRef.current; if (b) this.fZoomAt(b.clientWidth / 2, b.clientHeight / 2, f, true); }
+  fFit() {
+    const b = this.fvBoardRef.current; const S = Object.values(this._fvShown || {}); if (!b) return;
+    if (!S.length) { this.fcam = { x: 0, y: 0, s: 1 }; this.applyFCam(true); return; }
+    const x1 = Math.min(...S.map(r => r.x)) - 40, y1 = Math.min(...S.map(r => r.y)) - 50, x2 = Math.max(...S.map(r => r.x + r.w)) + 40, y2 = Math.max(...S.map(r => r.y + r.h)) + 40;
+    const s = clamp(Math.min(b.clientWidth / (x2 - x1), b.clientHeight / (y2 - y1)), 0.15, 1.5);
+    this.fcam = { s, x: (b.clientWidth - (x2 - x1) * s) / 2 - x1 * s, y: (b.clientHeight - (y2 - y1) * s) / 2 - y1 * s }; this.applyFCam(true);
+  }
+  onBoardWheel(e) {
+    const pinch = e.ctrlKey || e.metaKey; e.preventDefault(); const r = this.fvBoardRef.current.getBoundingClientRect();
+    if (pinch || (!this.isTrackpad(e) && this.wheelMode() === 'zoom')) { const k = pinch ? 0.01 : 0.0015; this.fZoomAt(e.clientX - r.left, e.clientY - r.top, clamp(Math.exp(-e.deltaY * k), 0.8, 1.25), false); }
+    else { const f = e.deltaMode === 1 ? 16 : 1; const sx = e.shiftKey && !e.deltaX; this.fcam.x -= (sx ? e.deltaY : e.deltaX) * f; if (!sx) this.fcam.y -= e.deltaY * f; this.applyFCam(false); if (this.state.fv && this.state.fv.sorted) this.forceUpdate(); }
+  }
+  fvPanStart(e) { e.preventDefault(); this.fpan = { sx: e.clientX, sy: e.clientY, x: this.fcam.x, y: this.fcam.y }; }
   fvBoardDown(e) {
+    if (e.pointerType === 'touch') { this.fpts = this.fpts || new Map(); this.fpts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (this.fpts.size === 2) { const [a, c] = [...this.fpts.values()]; this.fpinch = { d: Math.hypot(a.x - c.x, a.y - c.y), s: this.fcam.s }; this.mq = null; this.setState({ mqRect: null }); return; } }
+    if (e.button === 1 || (e.button === 0 && this._space)) { this.fvPanStart(e); return; }
     if (e.button !== 0 || e.target.closest('[data-card]') || e.target.closest('[data-hull]')) return; e.preventDefault();
     const p = this.boardPt(e); const add = e.ctrlKey || e.metaKey || e.shiftKey;
     this.mq = { sx: p.x, sy: p.y, base: add ? (this.state.fv.sel || []) : [] };
@@ -372,6 +408,7 @@ class App extends Component {
     this.setState(s => ({ mqRect: r, fv: s.fv ? Object.assign({}, s.fv, { sel }) : s.fv }));
   }
   fvDown(id, e) {
+    if (e.button === 1 || (e.button === 0 && this._space)) { e.stopPropagation(); this.fvPanStart(e); return; }
     if (e.button !== 0 || e.target.closest('[data-nodrag]')) return; e.stopPropagation(); e.preventDefault();
     let sel = this.state.fv.sel || [];
     if (e.ctrlKey || e.metaKey) { this.setFv({ sel: sel.includes(id) ? sel.filter(x => x !== id) : sel.concat(id) }); return; }
@@ -381,10 +418,10 @@ class App extends Component {
     this.fd = { id, ids: Object.keys(o), corner: ce ? ce.getAttribute('data-corner') : null, sx: e.clientX, sy: e.clientY, o, moved: false, el: e.currentTarget };
   }
   fvMove(e) {
-    const d = this.fd; const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
-    if (!d.moved && Math.hypot(dx, dy) < 4) return; d.moved = true; if (this.state.fv && this.state.fv.sorted) return;
+    const d = this.fd; const dx = (e.clientX - d.sx) / this.fcam.s, dy = (e.clientY - d.sy) / this.fcam.s;
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) return; d.moved = true; if (this.state.fv && this.state.fv.sorted) return;
     const live = {};
-    if (!d.corner) { d.ids.forEach(k => { const o = d.o[k]; live[k] = { x: Math.round(Math.max(0, o.x + dx)), y: Math.round(Math.max(0, o.y + dy)), w: o.w, h: o.h }; }); }
+    if (!d.corner) { d.ids.forEach(k => { const o = d.o[k]; live[k] = { x: Math.round(o.x + dx), y: Math.round(o.y + dy), w: o.w, h: o.h }; }); }
     else {
       const o = d.o[d.id]; if (!o) return; const MW = 110, MH = 72; const wst = d.corner.includes('w'), nth = d.corner.includes('n');
       let w = wst ? o.w - dx : o.w + dx, hh = nth ? o.h - dy : o.h + dy;
@@ -407,7 +444,7 @@ class App extends Component {
   openGroupMenu() {
     const f = this.state.fv; if (!f || !(f.sel || []).length) return; const S = this._fvShown || {}; const b = this.fvBoardRef.current.getBoundingClientRect();
     let x1 = 1e9, y2 = -1e9, x2 = -1e9; f.sel.forEach(k => { const c = S[k]; if (!c) return; x1 = Math.min(x1, c.x); x2 = Math.max(x2, c.x + c.w); y2 = Math.max(y2, c.y + c.h); });
-    if (x1 > 1e8) return; this.createGroupFor(f.sel, { x: b.left + (x1 + x2) / 2, y: b.top + y2 });
+    if (x1 > 1e8) return; const c = this.fcam; this.createGroupFor(f.sel, { x: b.left + c.x + (x1 + x2) / 2 * c.s, y: b.top + c.y + y2 * c.s });
   }
   createGroupFor(ids, pos) {
     const n = state.groups.length; const g = { id: uid(), name: 'Grupo ' + (n + 1), color: GROUP_COLORS[n % GROUP_COLORS.length] };
@@ -1018,7 +1055,7 @@ class App extends Component {
     const bySize = list.slice().sort((a, c) => ar(c) - ar(a));
     let rects = base;
     if (f.sorted && list.length) {
-      const R0 = { x: 14, y: 14, w: Math.max(100, bw - 28), h: Math.max(100, bh - 28) }; const tot = bySize.reduce((p, t) => p + ar(t), 0);
+      const fc = this.fcam; const R0 = { x: (14 - fc.x) / fc.s, y: (14 - fc.y) / fc.s, w: Math.max(100, (bw - 28) / fc.s), h: Math.max(100, (bh - 28) / fc.s) }; const tot = bySize.reduce((p, t) => p + ar(t), 0);
       const tm = treemap(bySize.map(t => ar(t) * R0.w * R0.h / tot), R0); rects = {};
       bySize.forEach((t, i) => { const r = tm[i]; rects[t.id] = { x: Math.round(r.x + 5), y: Math.round(r.y + 5), w: Math.max(20, Math.round(r.w - 10)), h: Math.max(20, Math.round(r.h - 10)) }; });
     }
@@ -1042,7 +1079,7 @@ class App extends Component {
 
     } else { const m = weekStart(f.key); title = 'Semana ' + isoWeek(m).week; sub = (rangeLbl(m) + ' · todo lo de la semana').toUpperCase(); }
     const n = sel.length;
-    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' elemento seleccionado' : ' elementos seleccionados') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Q ordena · E oculta hechas · W tareas ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
+    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' elemento seleccionado' : ' elementos seleccionados') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Dos dedos para moverte · pellizca para zoom · Q ordena · E oculta hechas · W ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar (Espacio + arrastrar mueve) · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
     const onAdd = e => { const v = e.target.value.trim(); if (e.key === 'Enter' && v) { const ex = {}; if (calF.length === 1) ex.cal = calF[0]; if (grpF.length === 1 && grpF[0] !== 'none') ex.groups = [grpF[0]]; isDay ? this.addTask(v, f.key, weekKey(parseDkey(f.key)), ex) : this.addTask(v, null, f.key, ex); e.target.value = ''; } };
     const corner = (c, pos, mark, col, cur) => html`<span data-corner=${c} style=${`position:absolute;${pos};width:18px;height:18px;cursor:${cur}`}><span style=${`position:absolute;${mark};width:8px;height:8px;border-color:${col}`}></span></span>`;
     const card = (t, i) => {
@@ -1094,11 +1131,20 @@ class App extends Component {
       </div>
       <div ref=${this.fvBoardRef} onPointerDown=${e => this.fvBoardDown(e)} style=${`background-image:${bgPattern(1).img};background-size:${bgPattern(1).size};position:relative;flex:1;min-height:0;overflow:hidden;background-color:transparent;user-select:none`}>
         ${!list.length ? html`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:rgba(245,244,250,0.52);font-size:14px">${f.showHidden ? 'No hay tareas ocultas con estos filtros. Selecciona tareas en el lienzo y pulsa W para ocultarlas.' : listAll.length ? 'Todas las tareas están ocultas. Pulsa W para verlas.' : 'Aún no hay nada aquí. Escribe arriba para crear la primera tarea.'}</div>` : null}
+        <div ref=${this.fvWorldRef} style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform">
         ${hulls.map(hh => html`<div key=${'h' + hh.g} data-hull="1" onDblClick=${e => { e.stopPropagation(); this.openGE(hh.g, { x: e.clientX, y: e.clientY }); }} title="Doble clic para editar el grupo" style=${`position:absolute;left:${hh.x}px;top:${hh.y}px;width:${hh.w}px;height:${hh.h}px;border-radius:14px;background:${hh.G.color}12;border:1.5px dashed ${hh.G.color}66;z-index:0`}><span class="disp" style=${`position:absolute;left:12px;top:6px;font-size:12.5px;font-weight:700;color:${hh.G.color};white-space:nowrap`}>${hh.G.name || 'Sin nombre'}</span></div>`)}
         ${bySize.map((t, i) => card(t, i))}
-        ${f.showHidden ? html`<div class="mono" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:100000;padding:6px 12px;border-radius:999px;background:rgba(20,26,48,0.6);border:1px dashed #6D66F0;color:#B3ADFF;font-size:10.5px;letter-spacing:.05em;pointer-events:none;white-space:nowrap">LIENZO DE OCULTAS · W RESTAURA LA SELECCIÓN</div>` : null}
         ${s.mqRect ? html`<div style=${`position:absolute;left:${s.mqRect.x}px;top:${s.mqRect.y}px;width:${s.mqRect.w}px;height:${s.mqRect.h}px;z-index:100001;background:rgba(109,102,240,0.08);border:1px solid rgba(109,102,240,0.6);border-radius:4px;pointer-events:none`}></div>` : null}
-        <div class="hide-sm" style="position:absolute;left:16px;bottom:16px;right:16px;z-index:100000;pointer-events:none"><span style="display:inline-block;padding:8px 12px;border-radius:12px;background:rgba(20,26,48,0.55);border:1px solid rgba(255,255,255,0.10);color:rgba(245,244,250,0.64);font-size:12px">${hint}</span></div>
+        </div>
+        ${f.showHidden ? html`<div class="mono" style="position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:100000;padding:6px 12px;border-radius:999px;background:rgba(20,26,48,0.6);border:1px dashed #6D66F0;color:#B3ADFF;font-size:10.5px;letter-spacing:.05em;pointer-events:none;white-space:nowrap">LIENZO DE OCULTAS · W RESTAURA LA SELECCIÓN</div>` : null}
+        <div style="position:absolute;right:16px;bottom:16px;z-index:100002;height:42px;padding:3px;border:1px solid rgba(255,255,255,0.15);border-radius:999px;background:rgba(20,26,48,0.42);backdrop-filter:blur(28px) saturate(170%);-webkit-backdrop-filter:blur(28px) saturate(170%);display:flex;align-items:center;gap:2px;box-shadow:0 10px 28px rgba(0,0,0,0.5)" onPointerDown=${e => e.stopPropagation()}>
+          <button class="h-raise" onClick=${() => this.fZoomBtn(1 / 1.2)} aria-label="Alejar" style="width:34px;height:34px;border:0;border-radius:999px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#F5F4FA">${svg(IC.minus, { w: 2.2 })}</button>
+          <span ref=${this.fzRef} class="mono" style="min-width:48px;text-align:center;font-size:12px;color:rgba(245,244,250,0.82)"></span>
+          <button class="h-raise" onClick=${() => this.fZoomBtn(1.2)} aria-label="Acercar" style="width:34px;height:34px;border:0;border-radius:999px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#F5F4FA">${svg(IC.plus, { w: 2.2 })}</button>
+          <span style="width:1px;height:20px;background:rgba(255,255,255,0.15);margin:0 3px"></span>
+          <button class="h-raise" onClick=${() => this.fFit()} aria-label="Ver todo" title="Ver todo (0)" style="width:34px;height:34px;border:0;border-radius:999px;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#F5F4FA">${svg(IC.fit)}</button>
+        </div>
+        <div class="hide-sm" style="position:absolute;left:16px;bottom:16px;right:230px;z-index:100000;pointer-events:none"><span style="display:inline-block;padding:8px 12px;border-radius:12px;background:rgba(20,26,48,0.55);border:1px solid rgba(255,255,255,0.10);color:rgba(245,244,250,0.64);font-size:12px">${hint}</span></div>
       </div>
     </div>`;
   }
