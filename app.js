@@ -293,7 +293,7 @@ class App extends Component {
     if (e.button === 1 || (e.button === 0 && !e.target.closest('[draggable="true"],input,textarea,select,[data-note],a,[data-addbox]'))) { e.preventDefault(); this.pan = { sx: e.clientX, sy: e.clientY, x: this.cam.x, y: this.cam.y }; this.vpRef.current.style.cursor = 'grabbing'; }
   }
   onMove(e) {
-    if (this.fpan) { this.fcam.x = this.fpan.x + e.clientX - this.fpan.sx; this.fcam.y = this.fpan.y + e.clientY - this.fpan.sy; this.applyFCam(false); return; }
+    if (this.fpan) { if (!this.fpan.moved && Math.hypot(e.clientX - this.fpan.sx, e.clientY - this.fpan.sy) > 4) this.fpan.moved = true; this.fcam.x = this.fpan.x + e.clientX - this.fpan.sx; this.fcam.y = this.fpan.y + e.clientY - this.fpan.sy; this.applyFCam(false); return; }
     if (this.fpinch && this.fpts && this.fpts.has(e.pointerId)) { this.fpts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [a, c] = [...this.fpts.values()]; if (!c) return; const r = this.fvBoardRef.current.getBoundingClientRect(); this.fZoomAt((a.x + c.x) / 2 - r.left, (a.y + c.y) / 2 - r.top, (this.fpinch.s * Math.hypot(a.x - c.x, a.y - c.y) / this.fpinch.d) / this.fcam.s, false); return; }
     if (this.fd) { this.fvMove(e); return; }
     if (this.mq) { this.fvMq(e); return; }
@@ -307,7 +307,7 @@ class App extends Component {
   }
   onUp(e) {
     if (this.fpts && e) { this.fpts.delete(e.pointerId); if (this.fpts.size < 2) this.fpinch = null; }
-    if (this.fpan) { this.fpan = null; return; }
+    if (this.fpan) { const p = this.fpan; this.fpan = null; if (p.right && p.moved) this._noCtxUntil = Date.now() + 400; else if (p.right && p.ctx) { const c = p.ctx; this.openCtx(c.id, { preventDefault() {}, stopPropagation() {}, clientX: c.x, clientY: c.y }); } return; }
     if (e && this.pts.has(e.pointerId)) { this.pts.delete(e.pointerId); if (this.pts.size < 2) this.pinch = null; }
     if (this.mq) { this.mq = null; this.setState({ mqRect: null }); return; }
     if (this.fd) { this.fvUp(); return; }
@@ -392,10 +392,10 @@ class App extends Component {
     if (pinch || (!this.isTrackpad(e) && this.wheelMode() === 'zoom')) { const k = pinch ? 0.01 : 0.0015; this.fZoomAt(e.clientX - r.left, e.clientY - r.top, clamp(Math.exp(-e.deltaY * k), 0.8, 1.25), false); }
     else { const f = e.deltaMode === 1 ? 16 : 1; const sx = e.shiftKey && !e.deltaX; this.fcam.x -= (sx ? e.deltaY : e.deltaX) * f; if (!sx) this.fcam.y -= e.deltaY * f; this.applyFCam(false); if (this.state.fv && this.state.fv.sorted) this.forceUpdate(); }
   }
-  fvPanStart(e) { e.preventDefault(); this.fpan = { sx: e.clientX, sy: e.clientY, x: this.fcam.x, y: this.fcam.y }; }
+  fvPanStart(e) { e.preventDefault(); this._noCtxUntil = 0; this.fpan = { sx: e.clientX, sy: e.clientY, x: this.fcam.x, y: this.fcam.y, right: e.button === 2, moved: false }; }
   fvBoardDown(e) {
     if (e.pointerType === 'touch') { this.fpts = this.fpts || new Map(); this.fpts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (this.fpts.size === 2) { const [a, c] = [...this.fpts.values()]; this.fpinch = { d: Math.hypot(a.x - c.x, a.y - c.y), s: this.fcam.s }; this.mq = null; this.setState({ mqRect: null }); return; } }
-    if (e.button === 1 || (e.button === 0 && this._space)) { this.fvPanStart(e); return; }
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && this._space)) { this.fvPanStart(e); return; }
     if (e.button !== 0 || e.target.closest('[data-card]') || e.target.closest('[data-hull]')) return; e.preventDefault();
     const p = this.boardPt(e); const add = e.ctrlKey || e.metaKey || e.shiftKey;
     this.mq = { sx: p.x, sy: p.y, base: add ? (this.state.fv.sel || []) : [] };
@@ -452,7 +452,9 @@ class App extends Component {
   }
   toggleGroupFor(ids, gid, allIn) { this.itemUpd(ids, it => { const gs = it.groups || []; return { groups: allIn ? gs.filter(x => x !== gid) : (gs.includes(gid) ? gs : gs.concat(gid)) }; }); }
   openCtx(id, e) {
-    e.preventDefault(); e.stopPropagation(); let ids = [id];
+    e.preventDefault(); e.stopPropagation(); if (this._noCtxUntil && Date.now() < this._noCtxUntil) return;
+    if (this.fpan && this.fpan.right && !this.fpan.moved) { this.fpan.ctx = { id, x: e.clientX, y: e.clientY }; return; }
+    let ids = [id];
     if (this.state.fv) { const sel = this.state.fv.sel || []; if (sel.includes(id)) ids = sel; else this.setFv({ sel: [id] }); }
     this.setState({ ctx: { ids, x: clamp(e.clientX, 8, innerWidth - 308), y: clamp(e.clientY, 8, innerHeight - 250) }, dm: null, ge: null, pop: null, menu: null });
   }
@@ -1079,7 +1081,7 @@ class App extends Component {
 
     } else { const m = weekStart(f.key); title = 'Semana ' + isoWeek(m).week; sub = (rangeLbl(m) + ' · todo lo de la semana').toUpperCase(); }
     const n = sel.length;
-    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' elemento seleccionado' : ' elementos seleccionados') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Dos dedos para moverte · pellizca para zoom · Q ordena · E oculta hechas · W ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar (Espacio + arrastrar mueve) · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
+    const hint = f.showHidden && !n ? 'Lienzo de ocultas · selecciona y pulsa W para restaurarlas · el ojo tachado restaura una · W o Esc para volver' : n ? (n + (n === 1 ? ' elemento seleccionado' : ' elementos seleccionados') + (f.showHidden ? ' · W las restaura · ' : ' · W las oculta · G crea un grupo · ') + 'clic derecho para añadir a uno · Ctrl+clic añade o quita') : f.sorted ? 'Vista ordenada de más a menos prioritaria · «Deshacer orden» vuelve a tu disposición' : 'Dos dedos para moverte · pellizca para zoom · Q ordena · E oculta hechas · W ocultas · Ctrl+Z deshace · Arrastra en el fondo para seleccionar · clic derecho + arrastrar para moverte · doble clic en una tarea o grupo para editar · clic derecho para grupos · esquinas para cambiar tamaño (⇧ proporción)';
     const onAdd = e => { const v = e.target.value.trim(); if (e.key === 'Enter' && v) { const ex = {}; if (calF.length === 1) ex.cal = calF[0]; if (grpF.length === 1 && grpF[0] !== 'none') ex.groups = [grpF[0]]; isDay ? this.addTask(v, f.key, weekKey(parseDkey(f.key)), ex) : this.addTask(v, null, f.key, ex); e.target.value = ''; } };
     const corner = (c, pos, mark, col, cur) => html`<span data-corner=${c} style=${`position:absolute;${pos};width:18px;height:18px;cursor:${cur}`}><span style=${`position:absolute;${mark};width:8px;height:8px;border-color:${col}`}></span></span>`;
     const card = (t, i) => {
@@ -1129,7 +1131,7 @@ class App extends Component {
           ${calF.length + grpF.length ? html`<button class="h-tint" onClick=${() => this.setFv({ calF: [], grpF: [] })} style="height:28px;padding:0 8px;border:0;border-radius:10px;background:transparent;color:#B3ADFF;font-size:12px;font-weight:500;cursor:pointer">Ver todo</button>` : null}
         </div>
       </div>
-      <div ref=${this.fvBoardRef} onPointerDown=${e => this.fvBoardDown(e)} style=${`background-image:${bgPattern(1).img};background-size:${bgPattern(1).size};position:relative;flex:1;min-height:0;overflow:hidden;background-color:transparent;user-select:none`}>
+      <div ref=${this.fvBoardRef} onPointerDown=${e => this.fvBoardDown(e)} onContextMenu=${e => e.preventDefault()} style=${`background-image:${bgPattern(1).img};background-size:${bgPattern(1).size};position:relative;flex:1;min-height:0;overflow:hidden;background-color:transparent;user-select:none`}>
         ${!list.length ? html`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:rgba(245,244,250,0.52);font-size:14px">${f.showHidden ? 'No hay tareas ocultas con estos filtros. Selecciona tareas en el lienzo y pulsa W para ocultarlas.' : listAll.length ? 'Todas las tareas están ocultas. Pulsa W para verlas.' : 'Aún no hay nada aquí. Escribe arriba para crear la primera tarea.'}</div>` : null}
         <div ref=${this.fvWorldRef} style="position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform">
         ${hulls.map(hh => html`<div key=${'h' + hh.g} data-hull="1" onDblClick=${e => { e.stopPropagation(); this.openGE(hh.g, { x: e.clientX, y: e.clientY }); }} title="Doble clic para editar el grupo" style=${`position:absolute;left:${hh.x}px;top:${hh.y}px;width:${hh.w}px;height:${hh.h}px;border-radius:14px;background:${hh.G.color}12;border:1.5px dashed ${hh.G.color}66;z-index:0`}><span class="disp" style=${`position:absolute;left:12px;top:6px;font-size:12.5px;font-weight:700;color:${hh.G.color};white-space:nowrap`}>${hh.G.name || 'Sin nombre'}</span></div>`)}
